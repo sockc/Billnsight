@@ -6,13 +6,16 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.sockc.billinsight.model.CategoryTotal
+import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.MerchantTotal
 import com.sockc.billinsight.model.Platform
+import com.sockc.billinsight.model.RecurringExpense
 import com.sockc.billinsight.model.Transaction
 import java.time.YearMonth
 import java.time.ZoneId
+import kotlin.math.roundToLong
 
 class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
 
@@ -40,6 +43,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         db.execSQL("CREATE INDEX idx_transactions_time ON transactions(occurred_at)")
         db.execSQL("CREATE INDEX idx_transactions_flow ON transactions(flow_type)")
         db.execSQL("CREATE INDEX idx_transactions_category ON transactions(category)")
+        db.execSQL("CREATE INDEX idx_transactions_platform ON transactions(platform)")
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -75,10 +79,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     put("fingerprint", item.fingerprint)
                 }
                 val id = writableDatabase.insertWithOnConflict(
-                    "transactions",
-                    null,
-                    values,
-                    SQLiteDatabase.CONFLICT_IGNORE
+                    "transactions", null, values, SQLiteDatabase.CONFLICT_IGNORE
                 )
                 if (id == -1L) duplicate++ else inserted++
             }
@@ -89,16 +90,11 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         return inserted to duplicate
     }
 
-    fun loadTransactions(limit: Int = 500): List<Transaction> {
+    fun loadTransactions(platform: Platform? = null, limit: Int = 500): List<Transaction> {
+        val where = if (platform == null) null else "platform=?"
+        val args = platform?.let { arrayOf(it.name) }
         readableDatabase.query(
-            "transactions",
-            null,
-            null,
-            null,
-            null,
-            null,
-            "occurred_at DESC",
-            limit.toString()
+            "transactions", null, where, args, null, null, "occurred_at DESC", limit.toString()
         ).use { cursor ->
             return buildList {
                 while (cursor.moveToNext()) add(cursor.toTransaction())
@@ -106,21 +102,34 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
     }
 
-    fun summary(month: YearMonth): DashboardSummary {
+    fun summary(
+        month: YearMonth,
+        platform: Platform? = null,
+        smallThresholdCent: Long = 5_000,
+    ): DashboardSummary {
         val (start, end) = monthRange(month)
+        val platformClause = if (platform == null) "" else " AND platform=?"
         val sql = """
             SELECT
-              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' THEN amount_cent ELSE 0 END), 0) expense,
-              COALESCE(SUM(CASE WHEN flow_type='INCOME' THEN amount_cent ELSE 0 END), 0) income,
-              COALESCE(SUM(CASE WHEN flow_type='REFUND' THEN amount_cent ELSE 0 END), 0) refund,
-              COALESCE(SUM(CASE WHEN flow_type='TRANSFER' THEN amount_cent ELSE 0 END), 0) transfer_amount,
-              COUNT(*) total_count,
-              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' AND amount_cent < 5000 THEN amount_cent ELSE 0 END), 0) small_amount,
-              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' AND amount_cent < 5000 THEN 1 ELSE 0 END), 0) small_count
+              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='INCOME' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='REFUND' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='TRANSFER' THEN amount_cent ELSE 0 END), 0),
+              COUNT(*),
+              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' AND amount_cent < ? THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' AND amount_cent < ? THEN 1 ELSE 0 END), 0)
             FROM transactions
-            WHERE occurred_at >= ? AND occurred_at < ?
+            WHERE occurred_at >= ? AND occurred_at < ?$platformClause
         """.trimIndent()
-        readableDatabase.rawQuery(sql, arrayOf(start.toString(), end.toString())).use { c ->
+        val args = mutableListOf(
+            smallThresholdCent.toString(),
+            smallThresholdCent.toString(),
+            start.toString(),
+            end.toString(),
+        )
+        platform?.let { args += it.name }
+
+        readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
             c.moveToFirst()
             return DashboardSummary(
                 expenseCent = c.getLong(0),
@@ -134,57 +143,154 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
     }
 
-    fun categoryTotals(month: YearMonth, limit: Int = 20): List<CategoryTotal> {
+    fun categoryTotals(month: YearMonth, platform: Platform? = null, limit: Int = 20): List<CategoryTotal> {
         val (start, end) = monthRange(month)
+        val platformClause = if (platform == null) "" else " AND platform=?"
         val sql = """
-            SELECT category, SUM(amount_cent) amount, COUNT(*) count
+            SELECT category, SUM(amount_cent), COUNT(*)
             FROM transactions
-            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'
+            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'$platformClause
             GROUP BY category
-            ORDER BY amount DESC
+            ORDER BY SUM(amount_cent) DESC
             LIMIT ?
         """.trimIndent()
-        readableDatabase.rawQuery(sql, arrayOf(start.toString(), end.toString(), limit.toString())).use { c ->
+        val args = mutableListOf(start.toString(), end.toString())
+        platform?.let { args += it.name }
+        args += limit.toString()
+
+        readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
             return buildList {
                 while (c.moveToNext()) add(CategoryTotal(c.getString(0), c.getLong(1), c.getInt(2)))
             }
         }
     }
 
-    fun merchantTotals(month: YearMonth, limit: Int = 20): List<MerchantTotal> {
+    fun merchantTotals(
+        month: YearMonth,
+        platform: Platform? = null,
+        category: String? = null,
+        limit: Int = 20,
+    ): List<MerchantTotal> {
         val (start, end) = monthRange(month)
+        val conditions = mutableListOf("occurred_at >= ?", "occurred_at < ?", "flow_type='EXPENSE'")
+        val args = mutableListOf(start.toString(), end.toString())
+        platform?.let {
+            conditions += "platform=?"
+            args += it.name
+        }
+        category?.let {
+            conditions += "category=?"
+            args += it
+        }
+        args += limit.toString()
+
         val sql = """
-            SELECT CASE WHEN counterparty='' THEN '未知商户' ELSE counterparty END merchant,
-                   SUM(amount_cent) amount, COUNT(*) count
+            SELECT CASE WHEN counterparty='' THEN '未知商户' ELSE counterparty END,
+                   SUM(amount_cent), COUNT(*)
             FROM transactions
-            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'
-            GROUP BY merchant
-            ORDER BY amount DESC
+            WHERE ${conditions.joinToString(" AND ")}
+            GROUP BY CASE WHEN counterparty='' THEN '未知商户' ELSE counterparty END
+            ORDER BY SUM(amount_cent) DESC
             LIMIT ?
         """.trimIndent()
-        readableDatabase.rawQuery(sql, arrayOf(start.toString(), end.toString(), limit.toString())).use { c ->
+
+        readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
             return buildList {
                 while (c.moveToNext()) add(MerchantTotal(c.getString(0), c.getLong(1), c.getInt(2)))
             }
         }
     }
 
-    fun largestExpenses(month: YearMonth, limit: Int = 10): List<Transaction> {
+    fun largestExpenses(month: YearMonth, platform: Platform? = null, limit: Int = 10): List<Transaction> {
         val (start, end) = monthRange(month)
+        val where = buildString {
+            append("occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'")
+            if (platform != null) append(" AND platform=?")
+        }
+        val args = mutableListOf(start.toString(), end.toString())
+        platform?.let { args += it.name }
+
         readableDatabase.query(
-            "transactions",
-            null,
-            "occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'",
-            arrayOf(start.toString(), end.toString()),
-            null,
-            null,
-            "amount_cent DESC",
-            limit.toString()
+            "transactions", null, where, args.toTypedArray(), null, null, "amount_cent DESC", limit.toString()
         ).use { cursor ->
             return buildList {
                 while (cursor.moveToNext()) add(cursor.toTransaction())
             }
         }
+    }
+
+    fun dailyTotals(month: YearMonth, platform: Platform? = null): List<DailyTotal> {
+        val (start, end) = monthRange(month)
+        val platformClause = if (platform == null) "" else " AND platform=?"
+        val sql = """
+            SELECT CAST(strftime('%d', occurred_at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS day_num,
+                   SUM(amount_cent), COUNT(*)
+            FROM transactions
+            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'$platformClause
+            GROUP BY day_num
+            ORDER BY day_num
+        """.trimIndent()
+        val args = mutableListOf(start.toString(), end.toString())
+        platform?.let { args += it.name }
+
+        readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
+            return buildList {
+                while (c.moveToNext()) add(DailyTotal(c.getInt(0), c.getLong(1), c.getInt(2)))
+            }
+        }
+    }
+
+    fun recurringExpenses(
+        month: YearMonth,
+        platform: Platform? = null,
+        lookbackMonths: Long = 4,
+        limit: Int = 12,
+    ): List<RecurringExpense> {
+        val (start, _) = monthRange(month.minusMonths(lookbackMonths - 1))
+        val (_, end) = monthRange(month)
+        val platformClause = if (platform == null) "" else " AND platform=?"
+        val sql = """
+            SELECT counterparty,
+                   strftime('%Y-%m', occurred_at / 1000, 'unixepoch', 'localtime') AS month_key,
+                   SUM(amount_cent), COUNT(*)
+            FROM transactions
+            WHERE occurred_at >= ? AND occurred_at < ?
+              AND flow_type='EXPENSE'
+              AND counterparty <> ''
+              AND category <> '经营相关'$platformClause
+            GROUP BY counterparty, month_key
+            ORDER BY counterparty, month_key
+        """.trimIndent()
+
+        val args = mutableListOf(start.toString(), end.toString())
+        platform?.let { args += it.name }
+
+        data class MonthlySpend(val month: String, val amount: Long, val count: Int)
+        val grouped = linkedMapOf<String, MutableList<MonthlySpend>>()
+        readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
+            while (c.moveToNext()) {
+                grouped.getOrPut(c.getString(0)) { mutableListOf() }
+                    .add(MonthlySpend(c.getString(1), c.getLong(2), c.getInt(3)))
+            }
+        }
+
+        val currentKey = month.toString()
+        return grouped.mapNotNull { (merchant, spends) ->
+            if (spends.size < 2) return@mapNotNull null
+            val min = spends.minOf { it.amount }
+            val max = spends.maxOf { it.amount }
+            if (min <= 0L || max > min * 2.5) return@mapNotNull null
+
+            RecurringExpense(
+                merchant = merchant,
+                averageMonthlyCent = spends.map { it.amount }.average().roundToLong(),
+                latestMonthCent = spends.firstOrNull { it.month == currentKey }?.amount ?: 0L,
+                activeMonths = spends.size,
+                transactionCount = spends.sumOf { it.count },
+            )
+        }
+            .sortedByDescending { it.averageMonthlyCent }
+            .take(limit)
     }
 
     fun updateCategory(id: Long, merchant: String, category: String, rememberMerchant: Boolean) {

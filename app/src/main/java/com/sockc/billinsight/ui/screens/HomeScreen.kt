@@ -19,18 +19,49 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.BillUiState
+import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.util.toYuanText
+import kotlin.math.abs
 
 @Composable
-fun HomeScreen(state: BillUiState, onPrevious: () -> Unit, onNext: () -> Unit, onImport: () -> Unit) {
+fun HomeScreen(
+    state: BillUiState,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onImport: () -> Unit,
+    onPlatformChange: (Platform?) -> Unit,
+) {
+    val current = state.summary.expenseCent
+    val previous = state.previousSummary.expenseCent
+    val delta = current - previous
+    val percent = if (previous > 0) delta * 100.0 / previous else null
+
     LazyColumn(Modifier.fillMaxSize()) {
-        item { PageTitle("账单洞察", "不要求你天天记账，把账单给我，我告诉你钱去哪了。") }
+        item { PageTitle("账单洞察", "不要求天天记账，导入账单后直接看钱去了哪里。") }
         item { MonthHeader(state.month, onPrevious, onNext) }
+        item { SourceFilterRow(state.platformFilter, onPlatformChange) }
         item {
             Card(Modifier.fillMaxWidth().padding(16.dp)) {
                 Column(Modifier.padding(18.dp)) {
-                    Text("本月消费支出", style = MaterialTheme.typography.labelLarge)
-                    Text(state.summary.expenseCent.toYuanText(), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                    Text("${platformLabel(state.platformFilter)} · 本月消费", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        current.toYuanText(),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    val compareText = when {
+                        previous == 0L && current == 0L -> "本月和上月都暂无消费"
+                        previous == 0L -> "上月暂无可比较消费"
+                        delta > 0 -> "比上月多 ${abs(delta).toYuanText()}（+${"%.1f".format(percent)}%）"
+                        delta < 0 -> "比上月少 ${abs(delta).toYuanText()}（${"%.1f".format(percent)}%）"
+                        else -> "与上月持平"
+                    }
+                    Text(
+                        compareText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         SummaryMini("收入", state.summary.incomeCent.toYuanText())
@@ -46,23 +77,56 @@ fun HomeScreen(state: BillUiState, onPrevious: () -> Unit, onNext: () -> Unit, o
             }
         }
         item {
-            Card(Modifier.fillMaxWidth().padding(16.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("小额高频", fontWeight = FontWeight.Bold)
-                    Text("低于 ¥50 的消费 ${state.summary.smallExpenseCount} 笔，共 ${state.summary.smallExpenseCent.toYuanText()}")
-                    Text("很多“钱不知道去哪了”，通常就藏在这里。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Column(Modifier.padding(14.dp)) {
+                    Text("导入提示", fontWeight = FontWeight.Bold)
+                    Text("微信：直接选择官方 XLSX 账单", style = MaterialTheme.typography.bodySmall)
+                    Text("支付宝：选择 CSV / XLSX；压缩包也可直接导入", style = MaterialTheme.typography.bodySmall)
+                    Text("重复导入会自动去重。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
         item {
-            Text("钱主要花在哪", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            Card(Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("小额高频", fontWeight = FontWeight.Bold)
+                    Text(
+                        "低于 ¥${state.smallThresholdYuan} 的消费 ${state.summary.smallExpenseCount} 笔，共 ${state.summary.smallExpenseCent.toYuanText()}"
+                    )
+                    Text(
+                        "很多“不知道钱花去哪了”通常藏在这里。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        item {
+            Text(
+                "钱主要花在哪",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+            )
         }
         if (state.categories.isEmpty()) {
-            item { Text("还没有账单，先导入一份 CSV/ZIP。", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item {
+                Text(
+                    "还没有当前筛选条件下的消费。",
+                    modifier = Modifier.padding(20.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         } else {
-            items(state.categories.take(6)) { item ->
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${item.category} · ${item.count} 笔")
+            items(state.categories.take(7)) { item ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CategoryBadge(item.category)
+                        Text("${item.count} 笔", style = MaterialTheme.typography.bodySmall)
+                    }
                     Text(item.amountCent.toYuanText(), fontWeight = FontWeight.SemiBold)
                 }
             }

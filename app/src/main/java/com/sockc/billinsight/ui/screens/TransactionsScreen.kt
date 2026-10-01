@@ -18,18 +18,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.importer.TransactionClassifier
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
 
 @Composable
 fun TransactionsScreen(
     transactions: List<Transaction>,
+    platformFilter: Platform?,
+    onPlatformChange: (Platform?) -> Unit,
     onCategoryChange: (Transaction, String, Boolean) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
-        item { PageTitle("流水", "点击分类即可修正；默认会记住该商户，后续自动归类。") }
+        item { PageTitle("流水", "微信/支付宝来源清楚标记；点击分类可修正并记住商户。") }
+        item { SourceFilterRow(platformFilter, onPlatformChange) }
+
         if (transactions.isEmpty()) {
-            item { Text("暂无流水", modifier = Modifier.padding(20.dp)) }
+            item { Text("当前筛选条件下暂无流水", modifier = Modifier.padding(20.dp)) }
         }
+
         items(transactions, key = { it.id }) { tx ->
             var expanded by remember(tx.id) { mutableStateOf(false) }
             TransactionCard(tx) {
@@ -42,7 +48,7 @@ fun TransactionsScreen(
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                             TransactionClassifier.categories.forEach { category ->
                                 DropdownMenuItem(
-                                    text = { Text(category) },
+                                    text = { CategoryBadge(category) },
                                     onClick = {
                                         expanded = false
                                         onCategoryChange(tx, category, true)

@@ -8,14 +8,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -49,6 +49,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
             Destination("我的", "我"),
         )
     }
+
     var zipPassword by remember { mutableStateOf("") }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::importBill)
@@ -119,12 +120,28 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (selected) {
-                0 -> HomeScreen(state, viewModel::previousMonth, viewModel::nextMonth, openImport)
-                1 -> TransactionsScreen(state.transactions, viewModel::updateCategory)
-                2 -> AnalysisScreen(state)
-                3 -> DiscoverScreen(state)
+                0 -> HomeScreen(
+                    state = state,
+                    onPrevious = viewModel::previousMonth,
+                    onNext = viewModel::nextMonth,
+                    onImport = openImport,
+                    onPlatformChange = viewModel::setPlatformFilter,
+                )
+                1 -> TransactionsScreen(
+                    transactions = state.transactions,
+                    platformFilter = state.platformFilter,
+                    onPlatformChange = viewModel::setPlatformFilter,
+                    onCategoryChange = viewModel::updateCategory,
+                )
+                2 -> AnalysisScreen(state, viewModel::setPlatformFilter)
+                3 -> DiscoverScreen(
+                    state = state,
+                    onPlatformChange = viewModel::setPlatformFilter,
+                    onSmallThresholdChange = viewModel::setSmallThreshold,
+                )
                 else -> SettingsScreen(state, openImport)
             }
+
             if (state.isLoading) {
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
             }

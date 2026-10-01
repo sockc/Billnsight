@@ -20,16 +20,16 @@ data class Transaction(
     val fingerprint: String,
 )
 
-data class CategoryTotal(
-    val category: String,
-    val amountCent: Long,
-    val count: Int,
-)
+data class CategoryTotal(val category: String, val amountCent: Long, val count: Int)
+data class MerchantTotal(val merchant: String, val amountCent: Long, val count: Int)
+data class DailyTotal(val dayOfMonth: Int, val amountCent: Long, val count: Int)
 
-data class MerchantTotal(
+data class RecurringExpense(
     val merchant: String,
-    val amountCent: Long,
-    val count: Int,
+    val averageMonthlyCent: Long,
+    val latestMonthCent: Long,
+    val activeMonths: Int,
+    val transactionCount: Int,
 )
 
 data class DashboardSummary(
@@ -49,4 +49,6 @@ data class ImportResult(
     val ignored: Int,
     val platform: Platform,
     val sourceName: String,
+    val startAt: Long? = null,
+    val endAt: Long? = null,
 )
