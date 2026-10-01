@@ -25,8 +25,8 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Run tests and compile debug
-        run: gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace
+      - name: Run tests and compile debug/release
+        run: gradle :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --stacktrace
 
       - name: Debug build notice
         run: |
