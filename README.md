@@ -4,7 +4,7 @@
 
 BillInsight 是一个 **Android 本地账单分析 App**。它的目标不是替代支付平台，也不是要求用户每消费一次就手动记账，而是把官方导出的微信 / 支付宝个人账单进行本地解析、去重、分类和分析。
 
-## V0.1 已实现
+## V0.1.1 已实现
 
 - Android 原生 Kotlin + Jetpack Compose
 - 微信 / 支付宝 CSV 表头自动识别
@@ -88,7 +88,7 @@ BillInsight 的核心口径：
 
 ## 隐私设计
 
-V0.1：
+V0.1.1：
 
 - 不需要账号
 - 不需要服务器
@@ -136,17 +136,23 @@ gradle wrapper --gradle-version 9.6.0
 
 ### Android CI
 
-`.github/workflows/android.yml` 用于：
+`.github/workflows/android.yml` 用于 Pull Request 和手工检查，自动运行单元测试以及 Debug / Release 编译验证。CI 不发布安装包。
 
-- push 到 `main`
-- Pull Request
-- 手工 workflow_dispatch
+### 自动固定签名 Release
 
-自动运行单元测试与 Debug 编译验证。Debug APK **不会再上传作为安装包**，避免误装非永久签名版本。
+`.github/workflows/android-release.yml` 会在代码推送到 `main` 后自动执行：
 
-### 固定签名 Release
+1. 读取 `versionName` / `versionCode`
+2. 注入永久 JKS
+3. 运行单元测试
+4. 构建签名 Release APK
+5. 用 `apksigner` 校验固定证书 SHA-256
+6. 自动上传 Signed APK Artifact
+7. 若对应 `vX.Y.Z` Release 尚不存在，自动创建 Git tag 和 GitHub Release 并上传 APK
 
-`.github/workflows/android-release.yml` 只生成永久签名 APK。
+因此正常开发流程只需要提交代码；**不需要再手工点 Run workflow 构建 APK**。
+
+同一个 `versionName` 后续再次提交代码时，仍会自动生成签名 APK Artifact，但不会覆盖已经发布的正式 GitHub Release。要发布新正式版本时，只需递增 `versionCode` 和 `versionName`。
 
 GitHub Actions Repository Secrets：
 

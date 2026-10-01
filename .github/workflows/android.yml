@@ -1,8 +1,6 @@
 name: Android CI
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -28,7 +26,7 @@ jobs:
       - name: Run tests and compile debug/release
         run: gradle :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --stacktrace
 
-      - name: Debug build notice
+      - name: CI notice
         run: |
-          echo "Debug APK is CI-only and intentionally not published."
-          echo "Installable builds must come from Android Signed Release."
+          echo "CI only validates the project."
+          echo "Installable APKs are produced by Android Signed Release."
