@@ -1,6 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+val signingProps = Properties()
+val signingPropsFile = rootProject.file("signing.properties")
+if (signingPropsFile.exists()) {
+    signingPropsFile.inputStream().use(signingProps::load)
 }
 
 android {
@@ -15,6 +23,17 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (signingPropsFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(signingProps.getProperty("storeFile"))
+                storePassword = signingProps.getProperty("storePassword")
+                keyAlias = signingProps.getProperty("keyAlias")
+                keyPassword = signingProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -22,6 +41,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (signingPropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -29,7 +51,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
 
     buildFeatures {
         compose = true

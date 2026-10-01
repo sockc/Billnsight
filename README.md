@@ -23,7 +23,7 @@ BillInsight 是一个 **Android 本地账单分析 App**。它的目标不是替
 - 小额高频消费分析（默认单笔 < ¥50）
 - 本月最大支出
 - 数据只存 Android App 私有 SQLite 数据库
-- GitHub Actions 自动编译 Debug APK
+- GitHub Actions 自动编译验证；可安装 APK 只从固定签名 Release 工作流产出
 
 ## 为什么“转账”不能算消费
 
@@ -122,11 +122,9 @@ V0.1：
 gradle :app:assembleDebug
 ```
 
-APK：
+Debug APK 仅用于 CI 编译验证，不再作为安装包发布。
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
+正式安装与升级必须使用固定签名的 Release APK。
 
 首次拉取后也可以生成 Gradle Wrapper：
 
@@ -136,13 +134,40 @@ gradle wrapper --gradle-version 9.6.0
 
 ## GitHub Actions
 
-`.github/workflows/android.yml` 会在：
+### Android CI
+
+`.github/workflows/android.yml` 用于：
 
 - push 到 `main`
 - Pull Request
 - 手工 workflow_dispatch
 
-时自动运行 `:app:assembleDebug` 并上传 APK Artifact。
+自动运行单元测试与 Debug 编译验证。Debug APK **不会再上传作为安装包**，避免误装非永久签名版本。
+
+### 固定签名 Release
+
+`.github/workflows/android-release.yml` 只生成永久签名 APK。
+
+GitHub Actions Repository Secrets：
+
+```text
+KEYSTORE
+STOREPASSWORD
+KEYALIAS
+KEYPASSWORD
+```
+
+其中 `KEYSTORE` 是固定 JKS 的 Base64 内容。JKS 不进入仓库。
+
+永久签名证书 SHA-256：
+
+```text
+26:88:8F:20:32:33:DB:5E:B9:6C:D9:42:FB:D5:84:FC:E8:DC:1F:6B:F7:5D:78:90:AF:4F:BF:73:9D:84:50:A4
+```
+
+Release 工作流在构建后使用 `apksigner` 再次校验 APK，证书指纹不一致会直接失败。
+
+> 永久 JKS 必须离线备份。丢失私钥后，Android 不允许新签名 APK 覆盖升级已有安装。
 
 ## Roadmap
 

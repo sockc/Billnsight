@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -25,12 +25,10 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Run tests and compile debug
+        run: gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BillInsight-debug
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+      - name: Debug build notice
+        run: |
+          echo "Debug APK is CI-only and intentionally not published."
+          echo "Installable builds must come from Android Signed Release."
