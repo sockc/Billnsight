@@ -74,11 +74,95 @@ jobs:
 
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee signature.txt
 
+          grep -Eq '^Verified using v2 scheme \(APK Signature Scheme v2\): true
+      - name: Prepare release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            APK_NAME="BillInsight-${GITHUB_REF_NAME}.apk"
+          else
+            APK_NAME="BillInsight-signed-${GITHUB_RUN_NUMBER}.apk"
+          fi
+
+          cp app/build/outputs/apk/release/app-release.apk "release/$APK_NAME"
+          echo "APK_NAME=$APK_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BillInsight-signed-release
+          path: release/${{ env.APK_NAME }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          APK="release/$APK_NAME"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+          else
+            gh release create "$TAG" "$APK"               --title "BillInsight $TAG"               --generate-notes
+          fi
+ signature.txt
+          grep -Eq '^Number of signers: 1
+      - name: Prepare release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            APK_NAME="BillInsight-${GITHUB_REF_NAME}.apk"
+          else
+            APK_NAME="BillInsight-signed-${GITHUB_RUN_NUMBER}.apk"
+          fi
+
+          cp app/build/outputs/apk/release/app-release.apk "release/$APK_NAME"
+          echo "APK_NAME=$APK_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BillInsight-signed-release
+          path: release/${{ env.APK_NAME }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          APK="release/$APK_NAME"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+          else
+            gh release create "$TAG" "$APK"               --title "BillInsight $TAG"               --generate-notes
+          fi
+ signature.txt
+
           EXPECTED="26888f203233db5eb96cd942fbd584fce8dc1f6bf75d7890af4fbf739d8450a4"
-          ACTUAL="$("$APKSIGNER" verify --print-certs "$APK"             | sed -n 's/^Signer #1 certificate SHA-256 digest: //p'             | head -n1             | tr '[:upper:]' '[:lower:]'             | tr -d ':[:space:]')"
+          ACTUAL="$(sed -n 's/^.*certificate SHA-256 digest: //p' signature.txt \
+            | head -n1 \
+            | tr '[:upper:]' '[:lower:]' \
+            | tr -d ':[:space:]')"
 
           echo "Expected certificate SHA-256: $EXPECTED"
           echo "Actual certificate SHA-256:   $ACTUAL"
+
+          test -n "$ACTUAL"
           test "$ACTUAL" = "$EXPECTED"
 
       - name: Prepare release APK
