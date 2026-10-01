@@ -110,7 +110,7 @@ fun DiscoverScreen(
                 InsightCard(
                     title = item.merchant,
                     main = "月均约 ${item.averageMonthlyCent.toYuanText()}",
-                    detail = "$current近 ${item.activeMonths} 个月出现 · 共 ${item.transactionCount} 笔",
+                    detail = "${current}近 ${item.activeMonths} 个月出现 · 共 ${item.transactionCount} 笔",
                 )
             }
         }
