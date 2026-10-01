@@ -16,7 +16,7 @@ import com.sockc.billinsight.BillUiState
 @Composable
 fun SettingsScreen(state: BillUiState, onImport: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        PageTitle("我的", "V0.1 · 本地优先")
+        PageTitle("我的", "V0.1.2 · 本地优先")
         Button(onClick = onImport, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Text("导入账单")
         }
@@ -30,12 +30,14 @@ fun SettingsScreen(state: BillUiState, onImport: () -> Unit) {
         Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Column(Modifier.padding(16.dp)) {
                 Text("当前支持", style = MaterialTheme.typography.titleMedium)
+                Text("• 微信 XLSX 账单")
                 Text("• CSV 账单")
-                Text("• ZIP 内的 CSV/TXT 账单")
+                Text("• ZIP 内的 XLSX/CSV/TXT 账单")
                 Text("• 微信 / 支付宝表头自动识别")
+                Text("• Excel 序列日期自动还原")
                 Text("• 重复导入自动去重")
                 Text("• 商户分类记忆")
-                Text("• XLS/XLSX 将在后续版本直接解析")
+                Text("• 旧版 XLS 暂不支持")
             }
         }
     }

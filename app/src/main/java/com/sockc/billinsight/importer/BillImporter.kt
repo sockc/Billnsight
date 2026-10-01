@@ -31,29 +31,89 @@ class BillImporter(
         val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
             ?: error("无法读取文件")
 
-        val extracted = if (sourceName.endsWith(".zip", true) || isZip(bytes)) {
-            extractFirstSupportedFile(bytes, zipPassword)
-        } else sourceName to bytes
-        val actualName = extracted.first
-        val actualBytes = extracted.second
-
-        require(!actualName.endsWith(".xlsx", true) && !actualName.endsWith(".xls", true)) {
-            "V0.1 先支持 CSV/ZIP 账单；Excel 账单请先另存为 CSV。"
+        val directXlsx = sourceName.endsWith(".xlsx", true) || XlsxParser.looksLikeXlsx(bytes)
+        val (actualName, actualBytes) = when {
+            directXlsx -> sourceName to bytes
+            sourceName.endsWith(".zip", true) || isZip(bytes) -> extractFirstSupportedFile(bytes, zipPassword)
+            else -> sourceName to bytes
         }
 
-        val text = decodeText(actualBytes)
+        require(!actualName.endsWith(".xls", true)) {
+            "暂不支持旧版 .xls，请导出为 .xlsx 或 CSV。"
+        }
+
+        return if (actualName.endsWith(".xlsx", true) || XlsxParser.looksLikeXlsx(actualBytes)) {
+            parseXlsx(actualName, actualBytes, merchantRules)
+        } else {
+            parseDelimited(actualName, actualBytes, merchantRules)
+        }
+    }
+
+    private fun parseXlsx(
+        sourceName: String,
+        bytes: ByteArray,
+        merchantRules: Map<String, String>,
+    ): ParsedBill {
+        val sheets = XlsxParser.parse(bytes)
+        val matched = sheets.firstNotNullOfOrNull { sheet ->
+            val headerIndex = findHeaderRow(sheet.rows)
+            if (headerIndex >= 0) Triple(sheet.rows, headerIndex, sheet.name) else null
+        } ?: error("XLSX 中没有找到交易时间/金额/交易对方等账单表头")
+
+        val rows = matched.first
+        val headerIndex = matched.second
+        val contextText = rows.take((headerIndex + 8).coerceAtMost(rows.size))
+            .flatten()
+            .joinToString("|")
+
+        return parseRows(
+            rows = rows,
+            headerIndex = headerIndex,
+            sourceName = sourceName,
+            merchantRules = merchantRules,
+            contextText = contextText,
+        )
+    }
+
+    private fun parseDelimited(
+        sourceName: String,
+        bytes: ByteArray,
+        merchantRules: Map<String, String>,
+    ): ParsedBill {
+        val text = decodeText(bytes)
         val rows = CsvParser.parse(text)
         require(rows.isNotEmpty()) { "文件中没有可识别的账单内容" }
 
         val headerIndex = findHeaderRow(rows)
         require(headerIndex >= 0) { "没有找到交易时间/金额/交易对方等账单表头" }
-        val headers = rows[headerIndex].map(::normalizeHeader)
-        val platform = detectPlatform(headers, text)
 
+        return parseRows(
+            rows = rows,
+            headerIndex = headerIndex,
+            sourceName = sourceName,
+            merchantRules = merchantRules,
+            contextText = text.take(5000),
+        )
+    }
+
+    private fun parseRows(
+        rows: List<List<String>>,
+        headerIndex: Int,
+        sourceName: String,
+        merchantRules: Map<String, String>,
+        contextText: String,
+    ): ParsedBill {
+        val headers = rows[headerIndex].map(::normalizeHeader)
+        val platform = detectPlatform(headers, contextText)
         val items = rows.drop(headerIndex + 1).mapNotNull { row ->
-            parseRow(row, headers, platform, actualName, merchantRules)
+            parseRow(row, headers, platform, sourceName, merchantRules)
         }
-        return ParsedBill(actualName, platform, items)
+
+        return ParsedBill(
+            sourceName = sourceName,
+            platform = platform,
+            transactions = items,
+        )
     }
 
     private fun parseRow(
@@ -131,10 +191,14 @@ class BillImporter(
     }
 
     private fun detectPlatform(headers: List<String>, text: String): Platform {
-        val all = (headers.joinToString("|") + text.take(3000)).lowercase()
+        val all = (headers.joinToString("|") + text.take(5000)).lowercase()
         return when {
-            all.contains("微信支付") || (all.contains("商户单号") && all.contains("当前状态")) -> Platform.WECHAT
-            all.contains("支付宝") || all.contains("商家订单号") || all.contains("交易创建时间") -> Platform.ALIPAY
+            all.contains("微信支付") ||
+                all.contains("微信支付账单") ||
+                (all.contains("商户单号") && all.contains("当前状态")) -> Platform.WECHAT
+            all.contains("支付宝") ||
+                all.contains("商家订单号") ||
+                all.contains("交易创建时间") -> Platform.ALIPAY
             else -> Platform.UNKNOWN
         }
     }
@@ -161,9 +225,21 @@ class BillImporter(
             temp.writeBytes(zipBytes)
             val zip = if (password.isNullOrBlank()) ZipFile(temp) else ZipFile(temp, password.toCharArray())
             if (zip.isEncrypted && password.isNullOrBlank()) throw PasswordRequiredException()
-            val header = zip.fileHeaders.firstOrNull { h ->
-                !h.isDirectory && listOf(".csv", ".txt", ".xlsx").any { h.fileName.endsWith(it, true) }
-            } ?: error("压缩包里没有找到 CSV/TXT/XLSX 账单")
+
+            val header = zip.fileHeaders
+                .filter { !it.isDirectory }
+                .sortedBy {
+                    when {
+                        it.fileName.endsWith(".xlsx", true) -> 0
+                        it.fileName.endsWith(".csv", true) -> 1
+                        it.fileName.endsWith(".txt", true) -> 2
+                        else -> 99
+                    }
+                }
+                .firstOrNull { h ->
+                    listOf(".xlsx", ".csv", ".txt").any { h.fileName.endsWith(it, true) }
+                } ?: error("压缩包里没有找到 XLSX/CSV/TXT 账单")
+
             return header.fileName.substringAfterLast('/') to zip.getInputStream(header).use { it.readBytes() }
         } catch (e: ZipException) {
             if (password.isNullOrBlank()) throw PasswordRequiredException()
