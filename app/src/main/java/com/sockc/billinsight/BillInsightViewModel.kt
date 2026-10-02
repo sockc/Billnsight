@@ -15,6 +15,7 @@ import com.sockc.billinsight.importer.ImportReview
 import com.sockc.billinsight.importer.ScanPaymentClassifier
 import com.sockc.billinsight.importer.PasswordRequiredException
 import com.sockc.billinsight.model.CategoryTotal
+import com.sockc.billinsight.model.CategoryEditPreview
 import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.ImportResult
@@ -104,6 +105,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             val previousAudit = _uiState.value.dataAudit
             val previousCategoryPreviewId=_uiState.value.categoryPreviewId
             val previousCategoryPreviewCount=_uiState.value.categoryPreviewCount
+            val previousCategoryPreview=_uiState.value.categoryPreview
             val sameScope=_uiState.value.month==month &&
                 _uiState.value.platformFilter==platform
             val previousTrendDetails=if(sameScope) _uiState.value.trendDetails
@@ -125,6 +127,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 BillUiState(
                     categoryPreviewId=previousCategoryPreviewId,
                     categoryPreviewCount=previousCategoryPreviewCount,
+                    categoryPreview=previousCategoryPreview,
                     searchQuery = searchQuery,
                     searchFlowFilter = searchFlowFilter,
                     searchLimit = searchLimit,
@@ -363,14 +366,16 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun previewExpenseCategory(tx: Transaction) {
-        _uiState.value=_uiState.value.copy(categoryPreviewId=tx.id,categoryPreviewCount=null)
+        _uiState.value=_uiState.value.copy(
+            categoryPreviewId=tx.id,categoryPreviewCount=null,categoryPreview=null)
         viewModelScope.launch {
             val result=runCatching { withContext(Dispatchers.IO) {
-                synchronized(db) { db.platformCategoryRuleCount(tx) }
+                synchronized(db) { db.previewExpenseCategory(tx.id) }
             }}
             if(_uiState.value.categoryPreviewId==tx.id) {
                 _uiState.value=_uiState.value.copy(
-                    categoryPreviewCount=result.getOrNull(),
+                    categoryPreview=result.getOrNull(),
+                    categoryPreviewCount=result.getOrNull()?.eligibleCount,
                     message=result.exceptionOrNull()?.message
                 )
             }
@@ -393,7 +398,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     onFailure={it.message?:"分类保存失败"}
                 ),
                 categoryPreviewId=null,
-                categoryPreviewCount=null
+                categoryPreviewCount=null,
+                categoryPreview=null
             )
             if(outcome.isSuccess) refresh()
         }
@@ -847,6 +853,7 @@ data class BillUiState(
     val month: YearMonth = currentYearMonth(),
     val categoryPreviewId: Long? = null,
     val categoryPreviewCount: Int? = null,
+    val categoryPreview: CategoryEditPreview? = null,
     val homePeriod: String = "MONTH",
     val homeStart: LocalDate = LocalDate.now().withDayOfMonth(1),
     val homeEnd: LocalDate = LocalDate.now(),

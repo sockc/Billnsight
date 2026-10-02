@@ -322,6 +322,8 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onPlatformChange=viewModel::setPlatformFilter,
                     onSelectMonth=viewModel::setHomeMonth,
                     onSelectPeriod=viewModel::setHomePeriod,
+                    onChangeExpenseCategory=viewModel::changeExpenseCategory,
+                    onPreviewExpenseCategory=viewModel::previewExpenseCategory,
                 )
                 else -> SettingsScreen(
                     state = state,

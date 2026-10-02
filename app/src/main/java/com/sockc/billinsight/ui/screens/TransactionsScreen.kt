@@ -78,7 +78,7 @@ fun TransactionsScreen(
     var bulkDialog by remember { mutableStateOf(false) }
     editingCategory?.let { tx ->
         ExpenseCategoryDialog(transaction=tx,
-            affectedCount=if(state.categoryPreviewId==tx.id) state.categoryPreviewCount else null,
+            preview=if(state.categoryPreviewId==tx.id) state.categoryPreview else null,
             onDismiss={editingCategory=null},
             onConfirm={ item, category, scope ->
                 onChangeExpenseCategory(item,category,scope)
