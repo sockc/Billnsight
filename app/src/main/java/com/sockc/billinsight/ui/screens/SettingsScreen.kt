@@ -181,8 +181,8 @@ fun SettingsScreen(
             }
         }
         item {
-            SettingsSection("关于 BillInsight","V0.1.9 · 本地优先") {
-                Text("支持自动识别贷款到账与还款，并可手动拆分本金、利息和手续费。",
+            SettingsSection("关于 BillInsight","V0.2.0 · 本地优先") {
+                Text("扫码支付与信用卡还款分开核算，支持扫码商户补名、手动记账和关联去重。",
                     style=MaterialTheme.typography.bodyMedium)
                 Text("根据系统设置自动切换深色/浅色主题。所有统计均可查看对应原始流水。",
                     style=MaterialTheme.typography.bodySmall,
