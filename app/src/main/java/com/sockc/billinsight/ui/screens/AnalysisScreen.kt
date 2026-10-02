@@ -69,7 +69,8 @@ fun AnalysisScreen(
     }
     val spendingCategories=state.periodCategories.filter {it.category!="金融费用"}
     val merchantGroups=MerchantAnalysis.groups(
-        state.periodTransactions,state.merchantAliases,state.scanMerchantLabels
+        state.periodTransactions.filter {it.id !in state.entrustedOriginIds},
+        state.merchantAliases,state.scanMerchantLabels
     )
     val income=CounterpartyAnalysis.incomeSources(
         state.periodTransactions,state.linkedReceiptIds
@@ -139,6 +140,7 @@ fun AnalysisScreen(
                 }
                 items(spendingCategories,key={"category_"+it.category}) { group ->
                     val records=state.periodTransactions.filter {
+                        it.id !in state.entrustedOriginIds &&
                         it.category==group.category &&
                             it.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)
                     }

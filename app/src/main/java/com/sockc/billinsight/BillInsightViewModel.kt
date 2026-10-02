@@ -7,6 +7,11 @@ import androidx.lifecycle.viewModelScope
 import com.sockc.billinsight.analysis.ProductAnalysis
 import com.sockc.billinsight.analysis.MerchantAnalysis
 import com.sockc.billinsight.analysis.MerchantGroup
+import com.sockc.billinsight.data.FinancePlanStore
+import com.sockc.billinsight.model.FinancePlan
+import com.sockc.billinsight.model.FinancePlanKind
+import com.sockc.billinsight.model.FinanceLinkRole
+import com.sockc.billinsight.model.FinanceLinkSuggestion
 import com.sockc.billinsight.data.BillDatabase
 import com.sockc.billinsight.data.BackupManager
 import com.sockc.billinsight.data.DataAuditReport
@@ -51,6 +56,8 @@ import java.time.format.DateTimeFormatter
 
 class BillInsightViewModel(application: Application) : AndroidViewModel(application) {
     private val db = BillDatabase(application)
+    private val financeStore = FinancePlanStore(db)
+    private var financeNeedsAutoSync=true
     private val importer = BillImporter(application, application.contentResolver)
     private val backupManager = BackupManager(application, db)
     private var pendingImportUri: Uri? = null
@@ -115,6 +122,10 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             _uiState.value = _uiState.value.copy(isLoading = true)
             val state = withContext(Dispatchers.IO) {
                 synchronized(db) {
+                if(financeNeedsAutoSync) {
+                    financeStore.syncVerifiedHistory()
+                    financeNeedsAutoSync=false
+                }
                 val thresholdCent = smallThresholdYuan * 100L
                 val categories = db.categoryTotals(month, platform)
                 val rangeRows = db.rangeTransactions(homeStartMillis,homeEndMillis,platform,10000)
@@ -143,6 +154,12 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     creditHistory = db.creditHistory(),
                     loanHistory = db.loanHistory(),
                     loanProfiles = db.loanProfiles(),
+                    financePlans=financeStore.plans(),
+                    financeOriginResults=_uiState.value.financeOriginResults,
+                    financeSearchQuery=_uiState.value.financeSearchQuery,
+                    financeLinkCandidates=_uiState.value.financeLinkCandidates,
+                    financeLinkPlanId=_uiState.value.financeLinkPlanId,
+                    financeLinkRole=_uiState.value.financeLinkRole,
                     categoryRules = db.categoryRules(),
                     platformCategoryRules = db.platformCategoryRules(),
                     trendDays = db.trend30(month,platform),
@@ -157,7 +174,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     merchantGroups = MerchantAnalysis.groups(history, merchantAliases, scanLabels),
                     monthlyMerchantGroups = MerchantAnalysis.groups(monthly, merchantAliases, scanLabels),
                     links = db.linksForMonth(month, platform),
-                    linkedReceiptIds = db.linkedReceiptIds(),
+                    linkedReceiptIds = db.linkedReceiptIds() + financeStore.recoveryReceiptIds(),
+                    entrustedOriginIds=financeStore.entrustedOriginIds(),
                     linkableReceipts = db.searchTransactions("", null, "INCOME", 2000)
                         .filter { it.flowType in setOf(FlowType.INCOME, FlowType.REFUND) },
                     month = month,
@@ -312,6 +330,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 }
             }
             outcome.onSuccess { result ->
+                financeNeedsAutoSync=true
                 pendingParsedBill=null
                 _uiState.value=_uiState.value.copy(
                     isLoading=false,importPreview=null,lastImportResult=result,
@@ -403,6 +422,99 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             )
             if(outcome.isSuccess) refresh()
         }
+    }
+
+    /** Search any imported historical bill; the current ledger month does not constrain it. */
+    fun searchFinanceOrigins(query: String) {
+        val needle=query.take(90)
+        _uiState.value=_uiState.value.copy(financeSearchQuery=needle)
+        viewModelScope.launch {
+            val outcome=runCatching {withContext(Dispatchers.IO) {
+                synchronized(db) {
+                    db.searchTransactions(needle,null,"EXPENSE",400)
+                        .filter {
+                            it.platform!=Platform.UNKNOWN &&
+                            it.sourceFile!="手动记账" &&
+                            it.flowType in setOf(
+                                FlowType.EXPENSE,FlowType.CREDIT_REPAYMENT,
+                                FlowType.LOAN_REPAYMENT
+                            )
+                        }
+                }
+            }}
+            if(_uiState.value.financeSearchQuery==needle)
+                _uiState.value=_uiState.value.copy(
+                    financeOriginResults=outcome.getOrDefault(emptyList()),
+                    message=outcome.exceptionOrNull()?.message
+                )
+        }
+    }
+
+    fun searchFinanceLinks(planId: Long,role: FinanceLinkRole,query: String="") {
+        _uiState.value=_uiState.value.copy(
+            financeLinkPlanId=planId,financeLinkRole=role,financeLinkCandidates=emptyList()
+        )
+        viewModelScope.launch {
+            val result=runCatching {withContext(Dispatchers.IO) {
+                synchronized(db){financeStore.candidates(planId,role,query)}
+            }}
+            if(_uiState.value.financeLinkPlanId==planId &&
+                _uiState.value.financeLinkRole==role)
+                _uiState.value=_uiState.value.copy(
+                    financeLinkCandidates=result.getOrDefault(emptyList()),
+                    message=result.exceptionOrNull()?.message
+                )
+        }
+    }
+
+    private fun changeInstallment(success:String,action:()->Unit) {
+        if(_uiState.value.isLoading){
+            _uiState.value=_uiState.value.copy(message="请等待本次账本操作完成")
+            return
+        }
+        viewModelScope.launch {
+            val result=runCatching {withContext(Dispatchers.IO) {
+                synchronized(db){action()}
+            }}
+            _uiState.value=_uiState.value.copy(
+                message=if(result.isSuccess)success else
+                    result.exceptionOrNull()?.message?:"保存分期失败"
+            )
+            if(result.isSuccess) refresh()
+        }
+    }
+
+    fun createInstallment(
+        sourceId: Long,kind: FinancePlanKind,beneficiary:String,title:String,
+        totalCent:Long?,termCount:Int?,dueDay:Int?,
+    ) = changeInstallment("已从原始账单生成分期卡片，正在关联历史记录") {
+        financeStore.createFromBill(
+            sourceId,kind,beneficiary,title,totalCent,termCount,dueDay
+        )
+        financeStore.syncVerifiedHistory()
+    }
+
+    fun updateInstallment(
+        id:Long,title:String,beneficiary:String,totalCent:Long?,
+        termCount:Int?,dueDay:Int?
+    )=changeInstallment("分期资料已更新，原始账单保留") {
+        financeStore.updatePlan(id,title,beneficiary,totalCent,termCount,dueDay)
+    }
+
+    fun deleteInstallment(id:Long)=changeInstallment(
+        "分期卡片已移除；所有原始账单和还款流水不受影响"
+    ){financeStore.deletePlan(id)}
+
+    fun associateInstallment(
+        planId:Long,transactionId:Long,role:FinanceLinkRole
+    )=changeInstallment("已关联原始账单；不会生成重复流水") {
+        financeStore.linkBill(planId,transactionId,role)
+    }
+
+    fun dissociateInstallment(
+        planId:Long,transactionId:Long,role:FinanceLinkRole
+    )=changeInstallment("已取消关联，原始账单仍保留") {
+        financeStore.unlinkBill(planId,transactionId,role)
     }
 
     private fun financeChange(success: String, action: BillDatabase.() -> Unit) {
@@ -820,7 +932,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 message = if (outcome.isSuccess) "加密账本已恢复，全部统计重新加载"
                     else outcome.exceptionOrNull()?.message ?: "恢复失败",
             )
-            if (outcome.isSuccess) refresh()
+            if (outcome.isSuccess) {financeNeedsAutoSync=true;refresh()}
         }
     }
 
@@ -900,6 +1012,12 @@ data class BillUiState(
     val trendSelectionLabel: String? = null,
     val loanHistory: List<Transaction> = emptyList(),
     val loanProfiles: List<LoanProfile> = emptyList(),
+    val financePlans: List<FinancePlan> = emptyList(),
+    val financeSearchQuery:String = "",
+    val financeOriginResults:List<Transaction> = emptyList(),
+    val financeLinkPlanId:Long? = null,
+    val financeLinkRole:FinanceLinkRole? = null,
+    val financeLinkCandidates:List<FinanceLinkSuggestion> = emptyList(),
     val categoryRules: List<MerchantRule> = emptyList(),
     val platformCategoryRules: List<PlatformCategoryRule> = emptyList(),
     val rulePreviewMerchant: String? = null,
@@ -917,6 +1035,7 @@ data class BillUiState(
     val auditTime: Long? = null,
     val links: List<ExpenseLink> = emptyList(),
     val linkedReceiptIds: Set<Long> = emptySet(),
+    val entrustedOriginIds:Set<Long> = emptySet(),
     val linkableReceipts: List<Transaction> = emptyList(),
     val searchQuery: String = "",
     val searchFlowFilter: String = "ALL",
