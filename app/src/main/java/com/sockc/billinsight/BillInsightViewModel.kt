@@ -94,7 +94,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         val now=LocalDate.now()
         val homeDates=when(homeKey) {
             "LAST_7" -> now.minusDays(6) to now
-            "LAST_MONTH" -> month.minusMonths(1).atDay(1) to month.minusMonths(1).atEndOfMonth()
+            "LAST_MONTH" -> YearMonth.from(now).minusMonths(1).atDay(1) to YearMonth.from(now).minusMonths(1).atEndOfMonth()
             "YEAR" -> LocalDate.of(now.year,1,1) to now
             "LAST_YEAR" -> LocalDate.of(now.year-1,1,1) to LocalDate.of(now.year-1,12,31)
             "CUSTOM" -> (customStart ?: month.atDay(1)) to (customEnd ?: month.atEndOfMonth())
