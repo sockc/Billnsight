@@ -50,7 +50,7 @@ class FinancePlanStore(private val helper: BillDatabase) {
         dueDay: Int?,
     ): Long {
         val source=importedTransaction(sourceId) ?: error("找不到原始导入账单")
-        require(source.platform!=Platform.UNKNOWN && source.sourceFile!="手动记账") {
+        require(source.platform!=Platform.UNKNOWN && source.!sourceFile.startsWith("手动")) {
             "请从导入的真实账单中选择分期记录"
         }
         require(source.flowType in setOf(
