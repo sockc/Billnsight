@@ -211,8 +211,7 @@ fun CreditCenterScreen(
                 TextButton(onClick=onBack){Text("‹ 返回")}
                 TextButton(onClick={adding=true}){Text("＋ 手动补录")}
             }
-            PageTitle("信用卡管理","核对账单、管理卡片和手动补录还款")
-            MonthHeader(state.month,onPrevious,onNext)
+            PageTitleWithMonth("信用卡管理","核对账单与还款",state.month,onPrevious,onNext)
         }
         item {
             Card(Modifier.fillMaxWidth().padding(horizontal=16.dp),
