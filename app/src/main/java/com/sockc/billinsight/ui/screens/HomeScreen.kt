@@ -85,7 +85,7 @@ fun HomeScreen(
                         Icons.Outlined.AccountBalanceWallet,Modifier.weight(1f)) {
                         onOpenLedgerFilter("RECEIPTS")
                     }
-                    SummaryTile("消费",summary.netExpenseCent,Blue,
+                    SummaryTile("消费",summary.shoppingConsumptionCent,Blue,
                         Icons.Outlined.ShoppingBag,Modifier.weight(1f)) {
                         onOpenLedgerFilter("CONSUMPTION")
                     }
