@@ -157,21 +157,25 @@ fun SectionHeader(title: String, detail: String? = null, trailing: @Composable (
 
 @Composable
 fun MonthHeader(month: YearMonth, onPrevious: () -> Unit, onNext: () -> Unit) {
-    Surface(
-        modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp),
-        color=MaterialTheme.colorScheme.surface,
-        shape=RoundedCornerShape(17.dp),
-        border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant),
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=2.dp),
+        horizontalArrangement=Arrangement.End
     ) {
-        Row(
-            Modifier.padding(horizontal=7.dp,vertical=1.dp),
-            horizontalArrangement=Arrangement.SpaceBetween,
-            verticalAlignment=Alignment.CenterVertically
-        ) {
-            TextButton(onClick=onPrevious) { Text("‹ 上月") }
-            Text("${month.year}年 ${month.monthValue}月",
-                style=MaterialTheme.typography.titleMedium)
-            TextButton(onClick=onNext) { Text("下月 ›") }
+        Surface(color=MaterialTheme.colorScheme.surface,
+            shape=RoundedCornerShape(13.dp),
+            border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) {
+            Row(Modifier.padding(horizontal=4.dp),
+                verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=Arrangement.spacedBy(1.dp)) {
+                TextButton(onClick=onPrevious,
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=5.dp,vertical=3.dp)
+                ){Text("‹")}
+                Text("${month.year}年${month.monthValue}月",
+                    style=MaterialTheme.typography.labelMedium)
+                TextButton(onClick=onNext,
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=5.dp,vertical=3.dp)
+                ){Text("›")}
+            }
         }
     }
 }
