@@ -30,6 +30,7 @@ import com.sockc.billinsight.model.LinkKind
 import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
 import com.sockc.billinsight.model.ProductGroup
+import com.sockc.billinsight.model.PlatformCategoryRule
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.RecurringExpense
 import com.sockc.billinsight.model.Transaction
@@ -147,6 +148,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     loanHistory = db.loanHistory(),
                     loanProfiles = db.loanProfiles(),
                     categoryRules = db.categoryRules(),
+                    platformCategoryRules = db.platformCategoryRules(),
                     trendDays = db.trend30(month,platform),
                     trendMonths = db.trend12(month,platform),
                     trendDetails = previousTrendDetails,
@@ -550,6 +552,11 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun deletePlatformCategoryRule(platform:Platform,merchant:String) =
+        financeChange("已删除此来源下的自动分类规则，历史账单保留") {
+            deletePlatformCategoryRule(platform,merchant)
+        }
+
     fun deleteCategoryRule(merchant:String) =
         financeChange("已删除自动分类规则；历史流水未更改") {
             deleteCategoryRule(merchant)
@@ -873,6 +880,7 @@ data class BillUiState(
     val loanHistory: List<Transaction> = emptyList(),
     val loanProfiles: List<LoanProfile> = emptyList(),
     val categoryRules: List<MerchantRule> = emptyList(),
+    val platformCategoryRules: List<PlatformCategoryRule> = emptyList(),
     val rulePreviewMerchant: String? = null,
     val rulePreviewCount: Int = 0,
     val importPreview: ImportPreview? = null,
