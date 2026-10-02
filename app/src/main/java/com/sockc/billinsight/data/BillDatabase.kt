@@ -75,6 +75,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         createScanTables(db)
         createMerchantNatureRulesTable(db)
         createPlatformCategoryRulesTable(db)
+        createInstallmentTables(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -192,6 +193,44 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             createMerchantNatureRulesTable(db)
         }
         if (oldVersion < 12) createPlatformCategoryRulesTable(db)
+        if (oldVersion < 13) createInstallmentTables(db)
+    }
+
+    private fun createInstallmentTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS finance_installment_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                origin_transaction_id INTEGER NOT NULL UNIQUE
+                    REFERENCES transactions(id) ON DELETE CASCADE,
+                platform TEXT NOT NULL,
+                institution TEXT NOT NULL,
+                title TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('OWN','ADVANCE')),
+                beneficiary TEXT NOT NULL DEFAULT '',
+                plan_reference TEXT,
+                total_cent INTEGER,
+                term_count INTEGER,
+                due_day INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )""".trimIndent()
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS finance_installment_links (
+                plan_id INTEGER NOT NULL REFERENCES finance_installment_plans(id)
+                    ON DELETE CASCADE,
+                transaction_id INTEGER NOT NULL REFERENCES transactions(id)
+                    ON DELETE CASCADE,
+                role TEXT NOT NULL CHECK(role IN ('ORIGIN','REPAYMENT','RECOVERY')),
+                auto_linked INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(plan_id,transaction_id,role),
+                UNIQUE(transaction_id,role)
+            )""".trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_finance_reference " +
+            "ON finance_installment_plans(platform,plan_reference)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_finance_links_plan " +
+            "ON finance_installment_links(plan_id,role)")
     }
 
     private fun createPlatformCategoryRulesTable(db: SQLiteDatabase) {
@@ -2497,6 +2536,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 12
+        private const val DB_VERSION = 13
     }
 }
