@@ -318,3 +318,18 @@ private fun DetailRow(label:String,value:String) {
             color=MaterialTheme.colorScheme.onSurface)
     }
 }
+
+@Composable
+fun EmptyFinanceCard(message:String) {
+    Card(
+        modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=5.dp),
+        shape=RoundedCornerShape(18.dp),
+        colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)
+    ) {
+        Text(
+            message,modifier=Modifier.padding(20.dp),
+            color=MaterialTheme.colorScheme.onSurfaceVariant,
+            style=MaterialTheme.typography.bodyMedium
+        )
+    }
+}
