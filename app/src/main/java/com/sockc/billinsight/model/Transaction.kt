@@ -97,6 +97,8 @@ data class DashboardSummary(
         ((expenseCent - loanFinanceCostCent - creditFundedExpenseCent).coerceAtLeast(0L) +
             creditRepaymentCent + loanRepaymentCent + businessExpenseCent + loanOutCent)
     val netExpenseCent: Long get() = (expenseCent - linkedRefundCent - linkedShareCent).coerceAtLeast(0)
+    val shoppingConsumptionCent: Long get() =
+        (netExpenseCent - loanFinanceCostCent).coerceAtLeast(0L)
 }
 
 data class ImportResult(
