@@ -344,18 +344,42 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
      * Explicit platform/merchant rules win over the bundled dictionary.
      * Never change repayment/transfer nature, manual entries or hand-edited rows.
      */
-    fun reclassifyOtherExpenses(): Pair<Int, Int> {
+    data class OtherReclassificationReport(
+        val updated: Int,
+        val checked: Int,
+        val unmatched: Int,
+        val reviewedOther: Int,
+        val manualOther: Int,
+    ) {
+        val remaining: Int get() = unmatched + reviewedOther + manualOther
+    }
+
+    /**
+     * Run only on explicit user request. A separate opt-in allows rechecking
+     * previously touched "其他" without overwriting any meaningful manual label.
+     * Counts refer to the whole remaining expense ledger, not just candidates.
+     */
+    fun reclassifyOtherExpenses(includeReviewedOther: Boolean = false): OtherReclassificationReport {
         val db = writableDatabase
         db.beginTransaction()
         try {
-            val candidates = db.query(
+            val allOther = db.query(
                 "transactions", null,
-                "flow_type='EXPENSE' AND category='其他' AND nature_modified=0 " +
-                    "AND source_file<>'手动记账'",
+                "flow_type='EXPENSE' AND category='其他'",
                 null, null, null, null
             ).use { c ->
-                buildList { while (c.moveToNext()) add(c.toTransaction()) }
+                buildList {
+                    while (c.moveToNext()) {
+                        add(c.toTransaction() to
+                            (c.getInt(c.getColumnIndexOrThrow("nature_modified")) != 0))
+                    }
+                }
             }
+            val candidates = allOther.filter { (tx, edited) ->
+                com.sockc.billinsight.importer.OtherReclassificationPolicy.eligible(
+                    tx.flowType, tx.category, tx.sourceFile, edited, includeReviewedOther
+                )
+            }.map { it.first }
             val scoped = applyPlatformCategoryRules(candidates)
             val generic = merchantRules().mapKeys {
                 MerchantCategoryPolicy.normalize(it.key)
@@ -375,16 +399,40 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 }
                 if (category != null && category != "其他" &&
                     category in TransactionClassifier.categories) {
+                    val extraGuard = if (includeReviewedOther) "" else " AND nature_modified=0"
                     changed += db.update(
                         "transactions",
                         ContentValues().apply { put("category", category) },
-                        "id=? AND nature_modified=0 AND flow_type='EXPENSE' AND category='其他'",
+                        "id=? AND flow_type='EXPENSE' AND category='其他'" + extraGuard,
                         arrayOf(original.id.toString())
                     )
                 }
             }
+            val leftover = db.query(
+                "transactions", arrayOf("source_file", "nature_modified"),
+                "flow_type='EXPENSE' AND category='其他'",
+                null, null, null, null
+            ).use { c ->
+                var unmatched = 0
+                var reviewed = 0
+                var manual = 0
+                while (c.moveToNext()) {
+                    when {
+                        c.getString(0) == "手动记账" -> manual++
+                        c.getInt(1) != 0 -> reviewed++
+                        else -> unmatched++
+                    }
+                }
+                Triple(unmatched, reviewed, manual)
+            }
             db.setTransactionSuccessful()
-            return changed to (candidates.size - changed)
+            return OtherReclassificationReport(
+                updated = changed,
+                checked = candidates.size,
+                unmatched = leftover.first,
+                reviewedOther = leftover.second,
+                manualOther = leftover.third,
+            )
         } finally {
             db.endTransaction()
         }

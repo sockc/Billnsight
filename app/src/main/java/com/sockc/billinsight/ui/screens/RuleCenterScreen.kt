@@ -41,7 +41,7 @@ fun RuleCenterScreen(
     state:BillUiState,
     onBack:()->Unit,
     onPreview:(String)->Unit,
-    onReclassify:()->Unit,
+    onReclassify:(Boolean)->Unit,
     onSaveCategory:(String,String,Boolean)->Unit,
     onDeleteCategory:(String)->Unit,
     onDeletePlatformCategory:(Platform,String)->Unit,
@@ -62,6 +62,7 @@ fun RuleCenterScreen(
     var deleting by remember { mutableStateOf<Pair<String,String>?>(null) }
     var confirmApply by remember { mutableStateOf(false) }
     var confirmReclassify by remember { mutableStateOf(false) }
+    var includeReviewedOther by remember { mutableStateOf(false) }
 
     fun clearForm() {
         editing=null;source="";target="";productMerchant=""
@@ -108,11 +109,25 @@ fun RuleCenterScreen(
         AlertDialog(
             onDismissRequest = { confirmReclassify = false },
             title = { Text("重新识别其他消费？") },
-            text = { Text("使用内置商户词库和已保存的规则，重新识别未人工修改的“其他”消费。还款、资金流转和手动分类不会被覆盖。") },
+            text = {
+                Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                    Text("用内置词库和保存的规则重查“其他”消费。不会触碰其他人工分类、还款或资金流转。")
+                    Row {
+                        Text("同时检查历史已标记为“其他”的导入账单",
+                            modifier=Modifier.weight(1f),
+                            style=MaterialTheme.typography.bodySmall)
+                        Switch(checked=includeReviewedOther,
+                            onCheckedChange={includeReviewedOther=it})
+                    }
+                    Text("默认关闭；开启后也只修改能明确识别、当前仍属于“其他”的账单。",
+                        style=MaterialTheme.typography.labelSmall,
+                        color=MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
             confirmButton = {
                 Button(onClick = {
                     confirmReclassify = false
-                    onReclassify()
+                    onReclassify(includeReviewedOther)
                 }) { Text("开始识别") }
             },
             dismissButton = {
@@ -273,7 +288,7 @@ fun RuleCenterScreen(
                         Text("内置常见品牌、本地小店关键词和交易说明匹配。导入时自动使用，也可以补正已有的“其他”账单。",
                             style=MaterialTheme.typography.bodySmall,
                             color=MaterialTheme.colorScheme.onSurfaceVariant)
-                        OutlinedButton(onClick={confirmReclassify=true}) {
+                        OutlinedButton(onClick={includeReviewedOther=false;confirmReclassify=true}) {
                             Text("重新识别已有其他消费")
                         }
                     }
