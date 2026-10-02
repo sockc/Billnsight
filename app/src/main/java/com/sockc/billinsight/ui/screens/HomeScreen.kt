@@ -30,6 +30,7 @@ fun HomeScreen(
     onNext: () -> Unit,
     onImport: () -> Unit,
     onPlatformChange: (Platform?) -> Unit,
+    onReviewPending: () -> Unit,
 ) {
     val current = state.summary.expenseCent
     val previous = state.previousSummary.expenseCent
@@ -74,6 +75,14 @@ fun HomeScreen(
         item {
             Button(onClick = onImport, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 Text("导入微信 / 支付宝账单")
+            }
+        }
+        if (state.pendingCount > 0) {
+            item {
+                Button(
+                    onClick = onReviewPending,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                ) { Text("待确认交易 ${state.pendingCount} 笔 · 去核对") }
             }
         }
         item {

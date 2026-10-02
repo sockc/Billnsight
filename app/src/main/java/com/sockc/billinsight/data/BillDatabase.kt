@@ -55,7 +55,34 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_transactions_platform ON transactions(platform)")
+            // Existing fingerprints and transaction IDs are untouched. Only obviously ambiguous
+            // old entries are put into review; transfers to one's own account stay excluded.
+            db.execSQL(
+                """
+                UPDATE transactions SET flow_type='PENDING', category='待确认'
+                WHERE flow_type='TRANSFER'
+                  AND (description LIKE '%转账%' OR description LIKE '%收钱码%' OR description LIKE '%二维码%')
+                  AND description NOT LIKE '%充值%'
+                  AND description NOT LIKE '%提现%'
+                  AND description NOT LIKE '%信用卡还款%'
+                  AND description NOT LIKE '%余额宝%'
+                  AND description NOT LIKE '%零钱通%'
+                  AND description NOT LIKE '%资金转入%'
+                  AND description NOT LIKE '%资金转出%'
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                UPDATE transactions SET flow_type='PENDING', category='待确认'
+                WHERE flow_type='EXPENSE' AND category='其他'
+                  AND (description LIKE '%二维码付款%' OR description LIKE '%扫码付款%')
+                """.trimIndent()
+            )
+        }
+    }
 
     fun insertAll(items: List<Transaction>): Pair<Int, Int> {
         var inserted = 0
@@ -111,13 +138,18 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         val platformClause = if (platform == null) "" else " AND platform=?"
         val sql = """
             SELECT
-              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type IN ('EXPENSE','GIFT_EXPENSE') THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='INCOME' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='REFUND' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='TRANSFER' THEN amount_cent ELSE 0 END), 0),
               COUNT(*),
-              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' AND amount_cent < ? THEN amount_cent ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN flow_type='EXPENSE' AND amount_cent < ? THEN 1 ELSE 0 END), 0)
+              COALESCE(SUM(CASE WHEN flow_type IN ('EXPENSE','GIFT_EXPENSE') AND amount_cent < ? THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type IN ('EXPENSE','GIFT_EXPENSE') AND amount_cent < ? THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='PENDING' THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='GIFT_EXPENSE' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='GIFT_INCOME' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='GIFT_EXPENSE' THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='GIFT_INCOME' THEN 1 ELSE 0 END), 0)
             FROM transactions
             WHERE occurred_at >= ? AND occurred_at < ?$platformClause
         """.trimIndent()
@@ -139,6 +171,11 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 transactionCount = c.getInt(4),
                 smallExpenseCent = c.getLong(5),
                 smallExpenseCount = c.getInt(6),
+                pendingCount = c.getInt(7),
+                giftExpenseCent = c.getLong(8),
+                giftIncomeCent = c.getLong(9),
+                giftExpenseCount = c.getInt(10),
+                giftIncomeCount = c.getInt(11),
             )
         }
     }
@@ -149,7 +186,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         val sql = """
             SELECT category, SUM(amount_cent), COUNT(*)
             FROM transactions
-            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'$platformClause
+            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type IN ('EXPENSE','GIFT_EXPENSE')$platformClause
             GROUP BY category
             ORDER BY SUM(amount_cent) DESC
             LIMIT ?
@@ -172,7 +209,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         limit: Int = 20,
     ): List<MerchantTotal> {
         val (start, end) = monthRange(month)
-        val conditions = mutableListOf("occurred_at >= ?", "occurred_at < ?", "flow_type='EXPENSE'")
+        val conditions = mutableListOf("occurred_at >= ?", "occurred_at < ?", "flow_type IN ('EXPENSE','GIFT_EXPENSE')")
         val args = mutableListOf(start.toString(), end.toString())
         platform?.let {
             conditions += "platform=?"
@@ -204,7 +241,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     fun largestExpenses(month: YearMonth, platform: Platform? = null, limit: Int = 10): List<Transaction> {
         val (start, end) = monthRange(month)
         val where = buildString {
-            append("occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'")
+            append("occurred_at >= ? AND occurred_at < ? AND flow_type IN ('EXPENSE','GIFT_EXPENSE')")
             if (platform != null) append(" AND platform=?")
         }
         val args = mutableListOf(start.toString(), end.toString())
@@ -226,7 +263,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             SELECT CAST(strftime('%d', occurred_at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS day_num,
                    SUM(amount_cent), COUNT(*)
             FROM transactions
-            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type='EXPENSE'$platformClause
+            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type IN ('EXPENSE','GIFT_EXPENSE')$platformClause
             GROUP BY day_num
             ORDER BY day_num
         """.trimIndent()
@@ -291,6 +328,49 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
             .sortedByDescending { it.averageMonthlyCent }
             .take(limit)
+    }
+
+    /** Review queue across all imported months; never limited to the latest 500 transactions. */
+    fun pendingTransactions(platform: Platform? = null, limit: Int = 200): List<Transaction> {
+        val where = "flow_type='PENDING'" + if (platform == null) "" else " AND platform=?"
+        readableDatabase.query(
+            "transactions", null, where,
+            platform?.let { arrayOf(it.name) }, null, null,
+            "occurred_at DESC", limit.toString()
+        ).use { cursor ->
+            return buildList {
+                while (cursor.moveToNext()) add(cursor.toTransaction())
+            }
+        }
+    }
+
+    fun pendingTotal(platform: Platform? = null): Int {
+        val where = "flow_type='PENDING'" + if (platform == null) "" else " AND platform=?"
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM transactions WHERE $where",
+            platform?.let { arrayOf(it.name) }
+        ).use { cursor ->
+            cursor.moveToFirst()
+            return cursor.getInt(0)
+        }
+    }
+
+    /**
+     * Changing a transaction's nature never changes its fingerprint or reimports it.
+     * Do not store a merchant-wide nature rule: one person can receive both loans and gifts.
+     */
+    fun updateNature(id: Long, flowType: FlowType, category: String) {
+        require(id > 0) { "无效流水" }
+        require(category.isNotBlank()) { "请选择分类" }
+        writableDatabase.update(
+            "transactions",
+            ContentValues().apply {
+                put("flow_type", flowType.name)
+                put("category", category)
+            },
+            "id=?",
+            arrayOf(id.toString())
+        )
     }
 
     fun updateCategory(id: Long, merchant: String, category: String, rememberMerchant: Boolean) {
@@ -365,6 +445,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
     }
 }

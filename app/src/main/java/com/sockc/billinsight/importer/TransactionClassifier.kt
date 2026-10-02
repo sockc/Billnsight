@@ -19,38 +19,60 @@ object TransactionClassifier {
         merchantRules: Map<String, String>,
     ): Classification {
         val all = "$direction $type $merchant $description $status".lowercase()
+        val kind = "$type $description".lowercase()
+        val state = status.lowercase()
+        val incoming = direction.contains("收入")
+        val outgoing = direction.contains("支出")
 
-        if (listOf("交易关闭", "已关闭", "失败", "未支付").any { all.contains(it) }) {
+        if (listOf("交易关闭", "已关闭", "失败", "未支付").any { state.contains(it) }) {
             return Classification(FlowType.IGNORE, "忽略")
         }
-        if (listOf("退款", "退回", "refund").any { all.contains(it) }) {
+        if (listOf("退款", "退回", "refund").any { kind.contains(it) || state.contains(it) }) {
             return Classification(FlowType.REFUND, "退款")
         }
-        if (listOf("转账", "充值", "提现", "信用卡还款", "余额宝", "零钱通", "资金转入", "资金转出")
-                .any { all.contains(it) }) {
+        if (kind.contains("红包") || type.contains("红包")) {
+            return when {
+                incoming -> Classification(FlowType.GIFT_INCOME, "红包收入")
+                outgoing -> Classification(FlowType.GIFT_EXPENSE, "人情")
+                else -> Classification(FlowType.PENDING, "待确认")
+            }
+        }
+        // Known movements between accounts are not personal consumption.
+        if (listOf("充值", "提现", "信用卡还款", "余额宝", "零钱通", "资金转入", "资金转出")
+                .any { kind.contains(it) }) {
             return Classification(FlowType.TRANSFER, "资金流转")
         }
+        // Do not guess the purpose of a payment to another person or a personal QR code.
+        if (listOf("转账", "二维码收款", "收钱码", "面对面收款", "个人收款码")
+                .any { kind.contains(it) }) {
+            return Classification(FlowType.PENDING, "待确认")
+        }
+        if (listOf("二维码付款", "扫码付款", "扫一扫付款").any { kind.contains(it) } &&
+            merchant.trim().isBlank()
+        ) {
+            return Classification(FlowType.PENDING, "待确认")
+        }
+        if (kind.contains("二维码付款") || kind.contains("扫码付款")) {
+            val knownCategory = merchantRules[merchant.trim()]
+            return if (outgoing && knownCategory != null) {
+                Classification(FlowType.EXPENSE, knownCategory)
+            } else {
+                Classification(FlowType.PENDING, "待确认")
+            }
+        }
 
-        val normalizedDirection = direction.trim()
         val flow = when {
-            normalizedDirection.contains("支出") -> FlowType.EXPENSE
-            normalizedDirection.contains("收入") -> FlowType.INCOME
-            normalizedDirection.contains("不计收支") -> FlowType.IGNORE
+            outgoing -> FlowType.EXPENSE
+            incoming -> FlowType.INCOME
+            direction.contains("不计收支") -> FlowType.IGNORE
             type.contains("支出") -> FlowType.EXPENSE
             type.contains("收入") -> FlowType.INCOME
             else -> FlowType.IGNORE
         }
-
         if (flow != FlowType.EXPENSE) {
-            return Classification(flow, when (flow) {
-                FlowType.INCOME -> "收入"
-                FlowType.IGNORE -> "忽略"
-                else -> "其他"
-            })
+            return Classification(flow, if (flow == FlowType.INCOME) "收入" else "忽略")
         }
-
         merchantRules[merchant.trim()]?.let { return Classification(FlowType.EXPENSE, it) }
-
         return Classification(FlowType.EXPENSE, categoryFor(all))
     }
 

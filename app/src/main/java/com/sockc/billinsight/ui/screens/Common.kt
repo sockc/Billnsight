@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.model.Platform
+import com.sockc.billinsight.model.displayName
 import com.sockc.billinsight.model.Transaction
 import com.sockc.billinsight.util.toDisplayDateTime
 import com.sockc.billinsight.util.toYuanText
@@ -35,12 +36,13 @@ fun categoryColor(category: String): Color = when (category) {
     "生活缴费" -> Color(0xFF0097A7)
     "娱乐" -> Color(0xFFEC407A)
     "医疗" -> Color(0xFFE53935)
-    "人情" -> Color(0xFFD81B60)
     "车辆" -> Color(0xFF1565C0)
     "数码" -> Color(0xFF5E35B1)
     "教育" -> Color(0xFF43A047)
     "旅行" -> Color(0xFF039BE5)
     "经营相关" -> Color(0xFF00796B)
+    "红包收入", "人情" -> Color(0xFFD81B60)
+    "待确认" -> Color(0xFFE69E18)
     else -> Color(0xFF757575)
 }
 
@@ -182,7 +184,7 @@ fun TransactionCard(item: Transaction, trailing: @Composable (() -> Unit)? = nul
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(item.amountCent.toYuanText(), fontWeight = FontWeight.Bold)
-                Text(item.flowType.name, style = MaterialTheme.typography.labelSmall)
+                Text(item.flowType.displayName(), style = MaterialTheme.typography.labelSmall)
                 trailing?.invoke()
             }
         }

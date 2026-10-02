@@ -16,7 +16,7 @@ import com.sockc.billinsight.BillUiState
 @Composable
 fun SettingsScreen(state: BillUiState, onImport: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        PageTitle("我的", "V0.1.3 · 本地优先")
+        PageTitle("我的", "V0.1.4 · 本地优先")
         Button(onClick = onImport, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Text("导入账单")
         }
@@ -29,7 +29,11 @@ fun SettingsScreen(state: BillUiState, onImport: () -> Unit) {
         }
         Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Column(Modifier.padding(16.dp)) {
-                Text("V0.1.3 新增", style = MaterialTheme.typography.titleMedium)
+                Text("V0.1.4 新增", style = MaterialTheme.typography.titleMedium)
+                Text("• 个人转账 / 二维码收付款识别")
+                Text("• 待确认交易队列和手动调整交易性质")
+                Text("• 红包收入、支出独立统计")
+                Text("• 非破坏性升级，保留既有账单")
                 Text("• 分类固定颜色")
                 Text("• 微信 / 支付宝来源 Badge 与筛选")
                 Text("• 本月 vs 上月消费变化")

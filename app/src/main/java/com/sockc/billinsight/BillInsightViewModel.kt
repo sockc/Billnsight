@@ -11,6 +11,7 @@ import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.ImportResult
+import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.MerchantTotal
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.RecurringExpense
@@ -55,6 +56,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     summary = db.summary(month, platform, thresholdCent),
                     previousSummary = db.summary(month.minusMonths(1), platform, thresholdCent),
                     transactions = db.loadTransactions(platform),
+                    pendingTransactions = db.pendingTransactions(platform),
+                    pendingCount = db.pendingTotal(platform),
                     categories = categories,
                     merchants = db.merchantTotals(month, platform),
                     categoryMerchants = categories.associate { category ->
@@ -146,6 +149,20 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun updateNature(transaction: Transaction, flowType: FlowType, category: String) {
+        viewModelScope.launch {
+            val saved = runCatching {
+                withContext(Dispatchers.IO) {
+                    db.updateNature(transaction.id, flowType, category)
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                message = if (saved.isSuccess) "交易性质已保存" else saved.exceptionOrNull()?.message ?: "保存失败"
+            )
+            if (saved.isSuccess) refresh()
+        }
+    }
+
     fun setPlatformFilter(platform: Platform?) {
         if (_uiState.value.platformFilter == platform) return
         refresh(platform = platform)
@@ -182,6 +199,8 @@ data class BillUiState(
     val summary: DashboardSummary = DashboardSummary(),
     val previousSummary: DashboardSummary = DashboardSummary(),
     val transactions: List<Transaction> = emptyList(),
+    val pendingTransactions: List<Transaction> = emptyList(),
+    val pendingCount: Int = 0,
     val categories: List<CategoryTotal> = emptyList(),
     val merchants: List<MerchantTotal> = emptyList(),
     val categoryMerchants: Map<String, List<MerchantTotal>> = emptyMap(),

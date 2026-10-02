@@ -67,6 +67,22 @@ fun DiscoverScreen(
 
         item {
             InsightCard(
+                title = "本月红包",
+                main = "发出 ${state.summary.giftExpenseCent.toYuanText()} · 收到 ${state.summary.giftIncomeCent.toYuanText()}",
+                detail = "发出 ${state.summary.giftExpenseCount} 笔，收到 ${state.summary.giftIncomeCount} 笔；收到的红包不冲减消费。",
+            )
+        }
+        if (state.pendingCount > 0) {
+            item {
+                InsightCard(
+                    title = "待确认交易",
+                    main = "${state.pendingCount} 笔",
+                    detail = "个人转账和不明确的二维码收付款暂不计消费，可在「流水 → 待确认」核对。",
+                )
+            }
+        }
+        item {
+            InsightCard(
                 title = "转账与资金流转",
                 main = state.summary.transferCent.toYuanText(),
                 detail = "这部分不算消费，避免银行卡→微信→付款被重复计算。",

@@ -39,6 +39,7 @@ private data class Destination(val label: String, val short: String)
 fun BillInsightApp(viewModel: BillInsightViewModel) {
     val state by viewModel.uiState.collectAsState()
     var selected by remember { mutableIntStateOf(0) }
+    var reviewMode by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val destinations = remember {
         listOf(
@@ -126,12 +127,17 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onNext = viewModel::nextMonth,
                     onImport = openImport,
                     onPlatformChange = viewModel::setPlatformFilter,
+                    onReviewPending = { reviewMode = true; selected = 1 },
                 )
                 1 -> TransactionsScreen(
                     transactions = state.transactions,
+                    pendingTransactions = state.pendingTransactions,
+                    pendingCount = state.pendingCount,
+                    reviewMode = reviewMode,
+                    onReviewModeChange = { reviewMode = it },
                     platformFilter = state.platformFilter,
                     onPlatformChange = viewModel::setPlatformFilter,
-                    onCategoryChange = viewModel::updateCategory,
+                    onNatureChange = viewModel::updateNature,
                 )
                 2 -> AnalysisScreen(state, viewModel::setPlatformFilter)
                 3 -> DiscoverScreen(
