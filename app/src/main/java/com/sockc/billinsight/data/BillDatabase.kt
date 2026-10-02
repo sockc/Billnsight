@@ -251,6 +251,29 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         } finally { db.endTransaction() }
     }
 
+    fun platformCategoryRules(): List<com.sockc.billinsight.model.PlatformCategoryRule> =
+        readableDatabase.rawQuery(
+            """SELECT r.platform,r.merchant,r.category,
+                (SELECT COUNT(*) FROM transactions t
+                 WHERE t.platform=r.platform AND t.counterparty=r.merchant
+                   AND t.flow_type='EXPENSE' AND t.nature_modified=0)
+               FROM platform_category_rules r
+               ORDER BY r.updated_at DESC""",null
+        ).use { c ->
+            buildList {
+                while(c.moveToNext()) {
+                    val p=runCatching { Platform.valueOf(c.getString(0)) }.getOrNull()
+                    if(p!=null) add(com.sockc.billinsight.model.PlatformCategoryRule(
+                        p,c.getString(1),c.getString(2),c.getInt(3)))
+                }
+            }
+        }
+
+    fun deletePlatformCategoryRule(platform: Platform, merchant: String) {
+        writableDatabase.delete("platform_category_rules",
+            "platform=? AND merchant=?",arrayOf(platform.name,merchant.trim()))
+    }
+
     fun platformCategoryRuleCount(tx: Transaction): Int {
         if (tx.counterparty.isBlank()) return 0
         return readableDatabase.rawQuery(
