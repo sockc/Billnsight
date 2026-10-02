@@ -67,6 +67,7 @@ data class DashboardSummary(
     val transactionCount: Int = 0,
     val smallExpenseCent: Long = 0,
     val smallExpenseCount: Int = 0,
+    val creditFundedExpenseCent: Long = 0,
     val creditRepaymentCent: Long = 0,
     val creditRepaymentCount: Int = 0,
     val loanRepaymentCent: Long = 0,
@@ -87,9 +88,12 @@ data class DashboardSummary(
     val giftIncomeCount: Int = 0,
 ) {
     val loanFinanceCostCent: Long get() = loanInterestCent + loanFeeCent
+    // Only explicitly credit-card-funded purchases are excluded from today's
+    // actual money outflow; they remain part of consumer spending. Repayments
+    // are counted when paid, never twice for an identified card purchase.
     val cashOutflowCent: Long get() =
-        expenseCent - loanFinanceCostCent + creditRepaymentCent + loanRepaymentCent +
-            businessExpenseCent + loanOutCent
+        ((expenseCent - loanFinanceCostCent - creditFundedExpenseCent).coerceAtLeast(0L) +
+            creditRepaymentCent + loanRepaymentCent + businessExpenseCent + loanOutCent)
     val netExpenseCent: Long get() = (expenseCent - linkedRefundCent - linkedShareCent).coerceAtLeast(0)
 }
 
