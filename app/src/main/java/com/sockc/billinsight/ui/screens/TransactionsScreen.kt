@@ -14,6 +14,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -82,8 +86,8 @@ fun TransactionsScreen(
         )
     }
 
-    LazyColumn(Modifier.fillMaxSize()) {
-        item { PageTitle("流水", "按日期看每一笔，搜索人名、商户或金额") }
+    LazyColumn(Modifier.fillMaxSize(), verticalArrangement=Arrangement.spacedBy(4.dp)) {
+        item { PageTitle("流水", "每日账单清晰分组，点击交易展开详情") }
         item { SourceFilterRow(platformFilter, onPlatformChange) }
         item {
             Row(
@@ -93,10 +97,12 @@ fun TransactionsScreen(
                 FilterChip(
                     selected = !reviewMode, onClick = { onReviewModeChange(false) },
                     label = { Text("全部流水") },
+                    shape=RoundedCornerShape(13.dp),
                 )
                 if(pendingCount>0) FilterChip(
                     selected=reviewMode,onClick={onReviewModeChange(true)},
                     label={Text("需核对 "+pendingCount+" 笔")},
+                    shape=RoundedCornerShape(13.dp),
                 )
             }
         }
@@ -123,8 +129,10 @@ fun TransactionsScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
-                    label = { Text("搜索人名、商户、金额或备注") },
-                    placeholder = { Text("搜索全部历史流水") },
+                    placeholder = { Text("搜索商户、商品、金额或备注") },
+                    leadingIcon = { androidx.compose.material3.Icon(
+                        androidx.compose.material.icons.Icons.Outlined.Search,null) },
+                    shape = RoundedCornerShape(18.dp),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 )
@@ -140,6 +148,7 @@ fun TransactionsScreen(
                                 selected = searchFlowFilter == key,
                                 onClick = { onSearchFlowChange(key) },
                                 label = { Text(title) },
+                                shape=RoundedCornerShape(12.dp),
                             )
                         }
                 }
