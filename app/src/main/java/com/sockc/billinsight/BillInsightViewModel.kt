@@ -62,6 +62,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             val previousMessage = _uiState.value.message
             _uiState.value = _uiState.value.copy(isLoading = true)
             val state = withContext(Dispatchers.IO) {
+                synchronized(db) {
                 val thresholdCent = smallThresholdYuan * 100L
                 val categories = db.categoryTotals(month, platform)
                 val monthly = db.monthTransactions(month, platform)
@@ -110,6 +111,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     isLoading = false,
                     message = previousMessage,
                 )
+                }
             }
             if (ticket == latestRefresh) _uiState.value = state
         }
@@ -120,8 +122,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    val parsed = importer.parse(uri, db.merchantRules(), zipPassword)
-                    val (inserted, duplicated) = db.insertAll(parsed.transactions)
+                    val parsed = importer.parse(uri, synchronized(db) { db.merchantRules() }, zipPassword)
+                    val (inserted, duplicated) = synchronized(db) { db.insertAll(parsed.transactions) }
                     ImportResult(
                         parsed = parsed.transactions.size,
                         inserted = inserted,
@@ -175,7 +177,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     fun updateCategory(transaction: Transaction, category: String, rememberMerchant: Boolean = true) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                db.updateCategory(transaction.id, transaction.counterparty, category, rememberMerchant)
+                synchronized(db) { db.updateCategory(transaction.id, transaction.counterparty, category, rememberMerchant) }
             }
             _uiState.value = _uiState.value.copy(
                 message = "已改为 $category${if (rememberMerchant) "，并记住该商户" else ""}"
@@ -250,7 +252,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     fun saveProductAlias(merchant: String, alias: String, canonical: String) {
         viewModelScope.launch {
             val result = runCatching {
-                withContext(Dispatchers.IO) { db.saveProductAlias(merchant, alias, canonical) }
+                withContext(Dispatchers.IO) { synchronized(db) { db.saveProductAlias(merchant, alias, canonical) } }
             }
             _uiState.value = _uiState.value.copy(
                 message = if (result.isSuccess) "同一商户商品名称已合并"
@@ -263,7 +265,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     fun linkRecovery(expenseId: Long, receiptId: Long, kind: LinkKind, amountCent: Long) {
         viewModelScope.launch {
             val result = runCatching {
-                withContext(Dispatchers.IO) { db.createLink(expenseId, receiptId, kind, amountCent) }
+                withContext(Dispatchers.IO) { synchronized(db) { db.createLink(expenseId, receiptId, kind, amountCent) } }
             }
             _uiState.value = _uiState.value.copy(
                 message = if (result.isSuccess) "关联成功，已重新计算净消费"
@@ -276,7 +278,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     fun unlinkRecovery(linkId: Long) {
         viewModelScope.launch {
             val result = runCatching {
-                withContext(Dispatchers.IO) { db.deleteLink(linkId) }
+                withContext(Dispatchers.IO) { synchronized(db) { db.deleteLink(linkId) } }
             }
             _uiState.value = _uiState.value.copy(
                 message = if (result.isSuccess) "已撤销关联"
@@ -290,7 +292,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             val saved = runCatching {
                 withContext(Dispatchers.IO) {
-                    db.updateNature(transaction.id, flowType, category)
+                    synchronized(db) { db.updateNature(transaction.id, flowType, category) }
                 }
             }
             _uiState.value = _uiState.value.copy(
@@ -309,7 +311,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.value = _uiState.value.copy(isLoading = true, message = null)
         viewModelScope.launch {
             val outcome = runCatching {
-                withContext(Dispatchers.IO) { backupManager.exportEncrypted(uri, password) }
+                withContext(Dispatchers.IO) { synchronized(db) { backupManager.exportEncrypted(uri, password) } }
             }
             _uiState.value = _uiState.value.copy(
                 isLoading = false,
@@ -327,7 +329,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.value = _uiState.value.copy(isLoading = true, message = null)
         viewModelScope.launch {
             val outcome = runCatching {
-                withContext(Dispatchers.IO) { backupManager.restoreEncrypted(uri, password) }
+                withContext(Dispatchers.IO) { synchronized(db) { backupManager.restoreEncrypted(uri, password) } }
             }
             _uiState.value = _uiState.value.copy(
                 isLoading = false,

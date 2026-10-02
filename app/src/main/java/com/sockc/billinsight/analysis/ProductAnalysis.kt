@@ -24,7 +24,7 @@ object ProductAnalysis {
         val grouped = expenses.groupBy { tx ->
             val merchant = tx.counterparty.trim().ifBlank { "未知商户" }
             val product = normalizeProduct(tx.description)
-            val resolvedMerchant = merchantAliases[MerchantAnalysis.merchantName(tx)?.lowercase()]
+            val resolvedMerchant = MerchantAnalysis.merchantName(tx)?.lowercase()?.let(merchantAliases::get)
                 ?.trim()?.takeIf { it.isNotBlank() }
                 ?: MerchantAnalysis.merchantName(tx) ?: merchant
             resolvedMerchant.lowercase() to if (product in generic) "" else
@@ -33,7 +33,7 @@ object ProductAnalysis {
         return grouped.map { (key, entries) ->
             val unspecified = key.second.isEmpty()
             ProductGroup(
-                merchant = merchantAliases[MerchantAnalysis.merchantName(entries.first())?.lowercase()]
+                merchant = MerchantAnalysis.merchantName(entries.first())?.lowercase()?.let(merchantAliases::get)
                     ?: MerchantAnalysis.merchantName(entries.first())
                     ?: entries.first().counterparty.trim().ifBlank { "未知商户" },
                 product = if (unspecified) "商品未注明" else
