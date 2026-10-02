@@ -12,6 +12,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.time.LocalDate
 import com.sockc.billinsight.BillInsightViewModel
+import com.sockc.billinsight.ui.screens.FinanceInstallmentScreen
 import com.sockc.billinsight.ui.screens.AnalysisScreen
 import com.sockc.billinsight.ui.screens.HomeScreen
 import com.sockc.billinsight.ui.screens.SettingsScreen
@@ -66,6 +68,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
             Destination("首页", Icons.Outlined.Home),
             Destination("流水", Icons.Outlined.ReceiptLong),
             Destination("分析", Icons.Outlined.BarChart),
+            Destination("金融分期", Icons.Outlined.AccountBalance),
             Destination("我的", Icons.Outlined.PersonOutline),
         )
     }
@@ -317,6 +320,8 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onSaveLoan = viewModel::saveLoanDetail,
                     onClearLoan = viewModel::clearLoanDetail,
                     onBulkConfirm = viewModel::bulkConfirmPending,
+                    onCreateFinance=viewModel::createInstallment,
+                    onOpenFinance={selected=3},
                 )
                 2 -> AnalysisScreen(
                     state=state,
@@ -326,6 +331,16 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onChangeExpenseCategory=viewModel::changeExpenseCategory,
                     onPreviewExpenseCategory=viewModel::previewExpenseCategory,
                     onReclassify=viewModel::reclassifyOtherExpenses,
+                )
+                3 -> FinanceInstallmentScreen(
+                    state=state,
+                    onSearchOrigins=viewModel::searchFinanceOrigins,
+                    onCreate=viewModel::createInstallment,
+                    onUpdate=viewModel::updateInstallment,
+                    onDelete=viewModel::deleteInstallment,
+                    onSearchLinks=viewModel::searchFinanceLinks,
+                    onLink=viewModel::associateInstallment,
+                    onUnlink=viewModel::dissociateInstallment,
                 )
                 else -> SettingsScreen(
                     state = state,
