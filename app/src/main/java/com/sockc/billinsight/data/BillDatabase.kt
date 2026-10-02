@@ -16,6 +16,7 @@ import com.sockc.billinsight.model.MerchantRule
 import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.importer.CreditRepaymentDetector
 import com.sockc.billinsight.importer.ScanPaymentClassifier
+import com.sockc.billinsight.importer.StrongDuplicateKey
 import com.sockc.billinsight.importer.TransactionClassifier
 import com.sockc.billinsight.importer.MerchantNatureRule
 import com.sockc.billinsight.importer.MerchantNaturePolicy
@@ -449,12 +450,52 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         )
     }
 
+    /**
+     * Cross-platform duplicates require a shared unmasked payment/order ID,
+     * exact amount and flow, and a date within seven days. Original rows
+     * remain untouched. Same amount + similar time is not sufficient.
+     */
+    fun crossPlatformDuplicateFingerprints(items: List<Transaction>): Set<String> {
+        val db = readableDatabase
+        return buildSet {
+            items.forEach { item ->
+                val ids = StrongDuplicateKey.identifiers(item)
+                if (ids.isEmpty() || item.occurredAt <= 0) return@forEach
+                for (key in ids) {
+                    db.rawQuery(
+                        """SELECT * FROM transactions
+                           WHERE (transaction_id=? OR merchant_order_id=?)
+                             AND platform!=? AND amount_cent=?
+                             AND occurred_at BETWEEN ? AND ? LIMIT 12""",
+                        arrayOf(
+                            key,key,item.platform.name,item.amountCent.toString(),
+                            (item.occurredAt - 604800000L).toString(),
+                            (item.occurredAt + 604800000L).toString()
+                        )
+                    ).use { cursor ->
+                        while (cursor.moveToNext()) {
+                            if (StrongDuplicateKey.isSamePayment(item,cursor.toTransaction())) {
+                                add(item.fingerprint)
+                                break
+                            }
+                        }
+                    }
+                    if (item.fingerprint in this) break
+                }
+            }
+        }
+    }
+
     fun insertAll(items: List<Transaction>): Pair<Int, Int> {
         var inserted = 0
         var duplicate = 0
         writableDatabase.beginTransaction()
         try {
             for (item in items) {
+                if (crossPlatformDuplicateFingerprints(listOf(item)).isNotEmpty()) {
+                    duplicate++
+                    continue
+                }
                 val values = ContentValues().apply {
                     put("platform", item.platform.name)
                     put("occurred_at", item.occurredAt)
