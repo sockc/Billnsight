@@ -24,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.BillUiState
+import java.time.YearMonth
+import java.time.LocalDate
 import com.sockc.billinsight.analysis.CounterpartyAnalysis
 import com.sockc.billinsight.analysis.CounterpartySummary
 import com.sockc.billinsight.model.FlowType
@@ -34,70 +36,69 @@ import com.sockc.billinsight.util.toYuanText
 fun AnalysisScreen(
     state:BillUiState,
     onPlatformChange:(com.sockc.billinsight.model.Platform?)->Unit,
-    onPrevious:()->Unit,
-    onNext:()->Unit,
+    onSelectMonth:(YearMonth)->Unit,
+    onSelectPeriod:(String,LocalDate?,LocalDate?)->Unit,
 ) {
     var selected by remember { mutableStateOf("EXPENSE") }
     val income=CounterpartyAnalysis.incomeSources(
-        state.monthlyTransactions,state.linkedReceiptIds)
-    val people=CounterpartyAnalysis.people(state.monthlyTransactions)
+        state.periodTransactions,state.linkedReceiptIds)
+    val people=CounterpartyAnalysis.people(state.periodTransactions)
     val received=people.sumOf { it.receivedCent }
     val sent=people.sumOf { it.sentCent }
     val transferred=received+sent
-    val credit=state.monthlyTransactions
+    val credit=state.periodTransactions
         .filter { it.flowType==FlowType.CREDIT_REPAYMENT }
         .groupBy {
             val raw=it.counterparty.trim().ifBlank { "未识别信用卡" }
             state.creditCenter.aliases[raw.lowercase()] ?: raw
         }
     val manual=if(state.platformFilter==null)
-        state.creditCenter.manual.filter { it.countsAsRepayment }
+        state.periodManualRepayments.filter { it.countsAsRepayment }
             .groupBy { it.cardName } else emptyMap()
     val creditNames=(credit.keys+manual.keys).distinct().sortedByDescending { key ->
         credit[key].orEmpty().sumOf { it.amountCent }+
             manual[key].orEmpty().sumOf { it.amountCent }
     }
-    val loans=state.monthlyTransactions.filter {
+    val loans=state.periodTransactions.filter {
         it.flowType==FlowType.LOAN_REPAYMENT
     }.groupBy { it.counterparty.trim().ifBlank { "未知贷款机构" } }
 
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(5.dp)) {
-        item { PageTitle("收支分析","选择分类，一眼看清资金去向和来源") }
-        item { MonthHeader(state.month,onPrevious,onNext) }
+        item { DateScopeTitle("收支分析","所选期间资金去向",state,onSelectMonth,onSelectPeriod) }
         item { SourceFilterRow(state.platformFilter,onPlatformChange) }
         item {
             Column(Modifier.padding(horizontal=16.dp,vertical=6.dp),
                 verticalArrangement=Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
-                    AnalysisModeCard("支出",state.summary.netExpenseCent,
+                    AnalysisModeCard("支出",state.homeSummary.netExpenseCent,
                         selected=="EXPENSE",Modifier.weight(1f)){selected="EXPENSE"}
-                    AnalysisModeCard("收入",state.summary.incomeCent,
+                    AnalysisModeCard("收入",state.homeSummary.incomeCent,
                         selected=="INCOME",Modifier.weight(1f)){selected="INCOME"}
                 }
                 Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                     AnalysisModeCard("资金往来",transferred,
                         selected=="TRANSFER",Modifier.weight(1f)){selected="TRANSFER"}
                     AnalysisModeCard("还款",
-                        state.summary.creditRepaymentCent+state.summary.loanRepaymentCent,
+                        state.homeSummary.creditRepaymentCent+state.homeSummary.loanRepaymentCent,
                         selected=="REPAYMENT",Modifier.weight(1f)){selected="REPAYMENT"}
                 }
             }
         }
 
         if(selected=="EXPENSE") {
-            item { CategoryDonutCard(state.categories,state.summary.netExpenseCent) }
+            item { CategoryDonutCard(state.periodCategories,state.homeSummary.netExpenseCent) }
             item { SectionHeader("分类排行","点击展开对应账单") }
-            if(state.categories.isEmpty())
-                item { EmptyFinanceCard("本月暂无支出记录") }
-            items(state.categories,key={it.category}) { category ->
-                val detail=state.monthlyTransactions.filter {
+            if(state.periodCategories.isEmpty())
+                item { EmptyFinanceCard("所选期间暂无支出记录") }
+            items(state.periodCategories,key={it.category}) { category ->
+                val detail=state.periodTransactions.filter {
                     if(category.category=="金融费用")
                         it.flowType==FlowType.LOAN_REPAYMENT &&
                             (state.loanDetails[it.id]?.financeCostCent?:0)>0
                     else it.category==category.category &&
                         it.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)
                 }
-                var open by remember(state.month,state.platformFilter,category.category) {
+                var open by remember(state.homeStart,state.homeEnd,state.platformFilter,category.category) {
                     mutableStateOf(false)
                 }
                 Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
@@ -130,7 +131,7 @@ fun AnalysisScreen(
             }
         } else if(selected=="INCOME") {
             item { SectionHeader("收入","按付款人统计总额、次数和明细") }
-            if(income.isEmpty()) item {EmptyFinanceCard("本月暂无收入记录")}
+            if(income.isEmpty()) item {EmptyFinanceCard("所选期间暂无收入记录")}
             items(income,key={"income_"+it.platform.name+"_"+it.name}) {
                 CounterpartyCard(it,showTransfer=false)
             }
@@ -151,7 +152,7 @@ fun AnalysisScreen(
                     }
                 }
             }
-            if(people.isEmpty()) item {EmptyFinanceCard("本月暂无转账往来")}
+            if(people.isEmpty()) item {EmptyFinanceCard("所选期间暂无转账往来")}
             items(people,key={"transfer_"+it.platform.name+"_"+it.name}) {
                 CounterpartyCard(it,showTransfer=true)
             }
@@ -168,27 +169,27 @@ fun AnalysisScreen(
                     shape=RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(16.dp),
                         verticalArrangement=Arrangement.spacedBy(7.dp)) {
-                        Text("本月还款合计",style=MaterialTheme.typography.titleSmall)
-                        Text((state.summary.creditRepaymentCent+
-                            state.summary.loanRepaymentCent).toYuanText(),
+                        Text("所选期间还款合计",style=MaterialTheme.typography.titleSmall)
+                        Text((state.homeSummary.creditRepaymentCent+
+                            state.homeSummary.loanRepaymentCent).toYuanText(),
                             style=MaterialTheme.typography.headlineMedium,
                             fontWeight=FontWeight.Bold)
-                        Text("信用卡 "+state.summary.creditRepaymentCent.toYuanText()+
-                            "（"+state.summary.creditRepaymentCount+" 笔）",
+                        Text("信用卡 "+state.homeSummary.creditRepaymentCent.toYuanText()+
+                            "（"+state.homeSummary.creditRepaymentCount+" 笔）",
                             style=MaterialTheme.typography.bodySmall)
-                        Text("贷款 "+state.summary.loanRepaymentCent.toYuanText()+
-                            "（"+state.summary.loanRepaymentCount+" 笔）",
+                        Text("贷款 "+state.homeSummary.loanRepaymentCent.toYuanText()+
+                            "（"+state.homeSummary.loanRepaymentCount+" 笔）",
                             style=MaterialTheme.typography.bodySmall)
                     }
                 }
             }
             item { SectionHeader("信用卡","按收款机构查看还款笔数和金额") }
             if(creditNames.isEmpty())
-                item {EmptyFinanceCard("本月暂无已识别的信用卡还款")}
+                item {EmptyFinanceCard("所选期间暂无已识别的信用卡还款")}
             items(creditNames,key={"credit_"+it}) { name ->
                 val originals=credit[name].orEmpty()
                 val supplements=manual[name].orEmpty()
-                var open by remember(state.month,state.platformFilter,name) {
+                var open by remember(state.homeStart,state.homeEnd,state.platformFilter,name) {
                     mutableStateOf(false)
                 }
                 Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
@@ -218,9 +219,9 @@ fun AnalysisScreen(
                 }
             }
             item {SectionHeader("贷款","按机构汇总还款，已拆分的本金利息保留")}
-            if(loans.isEmpty()) item {EmptyFinanceCard("本月暂无贷款还款")}
+            if(loans.isEmpty()) item {EmptyFinanceCard("所选期间暂无贷款还款")}
             items(loans.toList(),key={"loan_"+it.first}) { (name,transactions) ->
-                var open by remember(state.month,state.platformFilter,name) {
+                var open by remember(state.homeStart,state.homeEnd,state.platformFilter,name) {
                     mutableStateOf(false)
                 }
                 Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
