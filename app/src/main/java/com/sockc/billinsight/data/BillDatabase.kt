@@ -300,23 +300,31 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         } finally {db.endTransaction()}
     }
 
-    fun platformCategoryRules(): List<com.sockc.billinsight.model.PlatformCategoryRule> =
-        readableDatabase.rawQuery(
-            """SELECT r.platform,r.merchant,r.category,
-                (SELECT COUNT(*) FROM transactions t
-                 WHERE t.platform=r.platform AND t.counterparty=r.merchant
-                   AND t.flow_type='EXPENSE' AND t.nature_modified=0)
-               FROM platform_category_rules r
-               ORDER BY r.updated_at DESC""",null
+    fun platformCategoryRules(): List<com.sockc.billinsight.model.PlatformCategoryRule> {
+        val base=readableDatabase.rawQuery(
+            """SELECT platform,merchant,category FROM platform_category_rules
+               ORDER BY updated_at DESC""",null
         ).use { c ->
             buildList {
                 while(c.moveToNext()) {
-                    val p=runCatching { Platform.valueOf(c.getString(0)) }.getOrNull()
-                    if(p!=null) add(com.sockc.billinsight.model.PlatformCategoryRule(
-                        p,c.getString(1),c.getString(2),c.getInt(3)))
+                    val p=runCatching {Platform.valueOf(c.getString(0))}.getOrNull()
+                    if(p!=null) add(Triple(p,c.getString(1),c.getString(2)))
                 }
             }
         }
+        return base.map { (platform,merchant,category) ->
+            val template=Transaction(
+                id=-1,platform=platform,occurredAt=0,counterparty=merchant,
+                description="",directionText="支出",amountCent=1,
+                flowType=FlowType.EXPENSE,category=category,paymentMethod="",
+                transactionId="",merchantOrderId="",sourceFile="规则",fingerprint=""
+            )
+            com.sockc.billinsight.model.PlatformCategoryRule(
+                platform,merchant,category,
+                expenseMerchantMatches(readableDatabase,template).count {it.second}
+            )
+        }
+    }
 
     fun deletePlatformCategoryRule(platform: Platform, merchant: String) {
         writableDatabase.delete("platform_category_rules",
