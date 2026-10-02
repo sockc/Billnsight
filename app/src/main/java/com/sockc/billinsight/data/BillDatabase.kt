@@ -1185,6 +1185,98 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
     }
 
+    /**
+     * Exact inclusive-start/exclusive-end totals for the homepage date filter.
+     * Uses original ledger accounting rules rather than summing a truncated list.
+     */
+    fun homeRangeSummary(start: Long, end: Long, platform: Platform? = null): DashboardSummary {
+        require(end > start)
+        val clause = if (platform == null) "" else " AND t.platform=?"
+        fun args(vararg extra: String): Array<String> =
+            (listOf(start.toString(), end.toString()) +
+                (platform?.let { listOf(it.name) } ?: emptyList()) + extra).toTypedArray()
+        val totals = LongArray(12)
+        readableDatabase.rawQuery(
+            """SELECT
+                COALESCE(SUM(CASE WHEN t.flow_type IN ('EXPENSE','GIFT_EXPENSE') THEN t.amount_cent ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME')
+                    AND NOT EXISTS(SELECT 1 FROM transaction_links x WHERE x.receipt_id=t.id)
+                    THEN t.amount_cent ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type='CREDIT_REPAYMENT' THEN t.amount_cent ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type='CREDIT_REPAYMENT' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type='LOAN_REPAYMENT' THEN t.amount_cent ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type='LOAN_REPAYMENT' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type='BUSINESS_EXPENSE' THEN t.amount_cent ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type='LOAN_OUT' THEN t.amount_cent ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type='REFUND' THEN t.amount_cent ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type='TRANSFER' AND t.category='资金提现' THEN t.amount_cent ELSE 0 END),0),
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN t.flow_type='PENDING' THEN 1 ELSE 0 END),0)
+               FROM transactions t WHERE t.occurred_at>=? AND t.occurred_at<?$clause""",
+            args()
+        ).use { c ->
+            if (c.moveToFirst()) for (i in totals.indices) totals[i]=c.getLong(i)
+        }
+        val recovery=LongArray(2)
+        readableDatabase.rawQuery(
+            """SELECT l.kind,COALESCE(SUM(l.amount_cent),0)
+               FROM transaction_links l JOIN transactions t ON t.id=l.expense_id
+               WHERE t.occurred_at>=? AND t.occurred_at<?$clause GROUP BY l.kind""",
+            args()
+        ).use { c ->
+            while(c.moveToNext()) {
+                if(c.getString(0)=="REFUND") recovery[0]=c.getLong(1)
+                if(c.getString(0)=="SHARE") recovery[1]=c.getLong(1)
+            }
+        }
+        val fees=LongArray(3)
+        readableDatabase.rawQuery(
+            """SELECT COALESCE(SUM(d.principal_cent),0),COALESCE(SUM(d.interest_cent),0),
+                      COALESCE(SUM(d.fee_cent),0)
+               FROM loan_repayment_details d JOIN transactions t ON t.id=d.transaction_id
+               WHERE t.occurred_at>=? AND t.occurred_at<?$clause""",
+            args()
+        ).use { c ->
+            if(c.moveToFirst()) for(i in fees.indices) fees[i]=c.getLong(i)
+        }
+        val manual = if (platform == null) readableDatabase.rawQuery(
+            """SELECT COALESCE(SUM(amount_cent),0), COUNT(*) FROM manual_credit_repayments
+               WHERE occurred_at>=? AND occurred_at<? AND linked_transaction_id IS NULL""",
+            arrayOf(start.toString(),end.toString())
+        ).use { c -> c.moveToFirst(); c.getLong(0) to c.getInt(1) } else 0L to 0
+        return DashboardSummary(
+            expenseCent=totals[0]+fees[1]+fees[2],
+            incomeCent=totals[1],
+            creditRepaymentCent=totals[2]+manual.first,
+            creditRepaymentCount=totals[3].toInt()+manual.second,
+            loanRepaymentCent=totals[4],
+            loanRepaymentCount=totals[5].toInt(),
+            businessExpenseCent=totals[6],
+            loanOutCent=totals[7],
+            refundCent=totals[8],
+            withdrawalCent=totals[9],
+            transactionCount=totals[10].toInt(),
+            pendingCount=totals[11].toInt(),
+            linkedRefundCent=recovery[0],
+            linkedShareCent=recovery[1],
+            loanPrincipalCent=fees[0],
+            loanInterestCent=fees[1],
+            loanFeeCent=fees[2],
+            loanUnallocatedCent=(totals[4]-fees.sum()).coerceAtLeast(0)
+        )
+    }
+
+    fun homeRangeTransactions(start: Long, end: Long, platform: Platform?=null): List<Transaction> {
+        val where = "occurred_at>=? AND occurred_at<?" +
+            if(platform==null) "" else " AND platform=?"
+        val args=mutableListOf(start.toString(),end.toString())
+        platform?.let { args+=it.name }
+        return readableDatabase.query("transactions",null,where,args.toTypedArray(),null,null,
+            "occurred_at DESC","8").use { c ->
+            buildList { while(c.moveToNext()) add(c.toTransaction()) }
+        }
+    }
+
     fun categoryTotals(month: YearMonth, platform: Platform? = null, limit: Int = 20): List<CategoryTotal> {
         val (start, end) = monthRange(month)
         val platformClause = if (platform == null) "" else " AND platform=?"
