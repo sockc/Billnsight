@@ -38,7 +38,10 @@ object TransactionClassifier {
             }
         }
         // A credit-card bill payment is a real cash outflow, but not a second purchase.
-        if (outgoing && listOf("信用卡还款", "还信用卡", "偿还信用卡").any { kind.contains(it) }) {
+        if (outgoing && (
+            listOf("信用卡还款", "还信用卡", "偿还信用卡").any { kind.contains(it) } ||
+            (kind.contains("信用卡") && listOf("分期还款", "账单还款", "自动还款").any { kind.contains(it) })
+        )) {
             return Classification(FlowType.CREDIT_REPAYMENT, "信用卡还款")
         }
         // Explicit loan disbursements are liabilities, not earned personal income.

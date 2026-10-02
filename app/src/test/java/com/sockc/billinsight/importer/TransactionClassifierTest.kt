@@ -138,4 +138,10 @@ class TransactionClassifierTest {
         )
         assertEquals(FlowType.PENDING,actual.flowType)
     }
+    @Test fun creditCardInstallmentIsNotMistakenForLoanRepayment() {
+        val actual = TransactionClassifier.classify(
+            "支出","信用卡分期还款","建设银行","信用卡分期还款","成功",emptyMap()
+        )
+        assertEquals(FlowType.CREDIT_REPAYMENT,actual.flowType)
+    }
 }

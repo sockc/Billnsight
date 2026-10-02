@@ -35,11 +35,11 @@ fun TransactionNatureDialog(
 ) {
     val incoming = transaction.directionText.contains("收入") ||
         transaction.flowType in setOf(
-            FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY, FlowType.LOAN_DISBURSEMENT, FlowType.LOAN_DISBURSEMENT,
+            FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY, FlowType.LOAN_DISBURSEMENT,
             FlowType.BUSINESS_INCOME, FlowType.REFUND
         )
     val options = if (incoming) listOf(
-        FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY,
+        FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY, FlowType.LOAN_DISBURSEMENT,
         FlowType.BUSINESS_INCOME, FlowType.REFUND, FlowType.TRANSFER, FlowType.IGNORE
     ) else listOf(
         FlowType.EXPENSE, FlowType.GIFT_EXPENSE, FlowType.LOAN_OUT,

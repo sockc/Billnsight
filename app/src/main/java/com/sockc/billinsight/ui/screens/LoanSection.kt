@@ -123,31 +123,51 @@ fun LoanSection(
             onClear=onClear
         )
     }
-    Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=8.dp)) {
-        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(9.dp)) {
-            Text("贷款与还款",style=MaterialTheme.typography.titleMedium,
-                fontWeight=FontWeight.Bold)
-            Text("本月偿还 ${state.summary.loanRepaymentCent.toYuanText()} · " +
-                    "${state.summary.loanRepaymentCount} 笔",
-                style=MaterialTheme.typography.titleLarge,
-                fontWeight=FontWeight.Bold)
-            if(state.summary.loanRepaymentCent>0) {
-                Text("其中本金 ${state.summary.loanPrincipalCent.toYuanText()} · " +
-                    "利息 ${state.summary.loanInterestCent.toYuanText()} · " +
-                    "手续费 ${state.summary.loanFeeCent.toYuanText()}",
-                    style=MaterialTheme.typography.bodyMedium)
-                if(state.summary.loanUnallocatedCent>0) {
-                    Text("待拆分：${state.summary.loanUnallocatedCent.toYuanText()}。该部分已计资金支出，但不猜算消费。",
-                        color=MaterialTheme.colorScheme.onSurfaceVariant,
-                        style=MaterialTheme.typography.bodySmall)
+    Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        Card(
+            Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=5.dp),
+            shape=androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            colors=androidx.compose.material3.CardDefaults.cardColors(
+                containerColor=MaterialTheme.colorScheme.surface
+            )
+        ) {
+            Column(Modifier.padding(17.dp),verticalArrangement=Arrangement.spacedBy(9.dp)) {
+                Text("本月偿还",style=MaterialTheme.typography.bodySmall,
+                    color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(state.summary.loanRepaymentCent.toYuanText(),
+                    style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)
+                Text(
+                    "${state.summary.loanRepaymentCount} 笔 · " +
+                        "贷款到账 ${state.summary.loanDisbursementCent.toYuanText()}",
+                    style=MaterialTheme.typography.bodySmall,
+                    color=MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if(state.summary.loanRepaymentCent>0L) {
+                    androidx.compose.material3.HorizontalDivider(
+                        color=MaterialTheme.colorScheme.outlineVariant
+                    )
+                    Text(
+                        "本金 ${state.summary.loanPrincipalCent.toYuanText()} · " +
+                        "利息 ${state.summary.loanInterestCent.toYuanText()} · " +
+                        "手续费 ${state.summary.loanFeeCent.toYuanText()}",
+                        style=MaterialTheme.typography.bodyMedium
+                    )
+                    if(state.summary.loanUnallocatedCent>0L) {
+                        Text(
+                            "未拆分：${state.summary.loanUnallocatedCent.toYuanText()}。已计资金支出，未猜算为消费。",
+                            style=MaterialTheme.typography.bodySmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-            }
-            Text("贷款到账：${state.summary.loanDisbursementCent.toYuanText()}（借款不算收入）",
-                style=MaterialTheme.typography.bodySmall)
-            if(loans.isEmpty() && disbursements.isEmpty()) {
-                Text("本月暂无贷款记录",
+                Text("借款到账不算个人收入；只有明确拆分的利息和手续费才算消费。",
+                    style=MaterialTheme.typography.bodySmall,
                     color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+        if(loans.isEmpty() && disbursements.isEmpty()) {
+            EmptyFinanceCard("本月暂无贷款记录")
+        } else {
             loans.forEach { tx ->
                 TransactionCard(tx,trailing={
                     TextButton(onClick={editing=tx}) {
