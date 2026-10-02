@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
@@ -52,11 +53,30 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     private var pendingImportUri: Uri? = null
     private var pendingParsedBill: BillImporter.ParsedBill? = null
     private var latestRefresh = 0
+    private var homePeriodKey = "MONTH"
+    private var homeCustomStart: LocalDate? = null
+    private var homeCustomEnd: LocalDate? = null
 
     private val _uiState = MutableStateFlow(BillUiState())
     val uiState: StateFlow<BillUiState> = _uiState.asStateFlow()
 
     init { refresh() }
+
+    fun setHomePeriod(key: String, customStart: LocalDate? = null, customEnd: LocalDate? = null) {
+        require(key in setOf("MONTH","LAST_MONTH","LAST_7","YEAR","LAST_YEAR","CUSTOM"))
+        if (key == "CUSTOM") require(customStart != null && customEnd != null && !customStart.isAfter(customEnd))
+        homePeriodKey=key
+        homeCustomStart=customStart
+        homeCustomEnd=customEnd
+        refresh()
+    }
+
+    fun setHomeMonth(month: YearMonth) {
+        homePeriodKey="MONTH"
+        homeCustomStart=null
+        homeCustomEnd=null
+        refresh(month=month)
+    }
 
     fun refresh(
         month: YearMonth = _uiState.value.month,
@@ -68,6 +88,20 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         merchantPeriod: String = _uiState.value.merchantPeriod,
     ) {
         val ticket = ++latestRefresh
+        val homeKey=homePeriodKey
+        val customStart=homeCustomStart
+        val customEnd=homeCustomEnd
+        val now=LocalDate.now()
+        val homeDates=when(homeKey) {
+            "LAST_7" -> now.minusDays(6) to now
+            "LAST_MONTH" -> YearMonth.from(now).minusMonths(1).atDay(1) to YearMonth.from(now).minusMonths(1).atEndOfMonth()
+            "YEAR" -> LocalDate.of(now.year,1,1) to now
+            "LAST_YEAR" -> LocalDate.of(now.year-1,1,1) to LocalDate.of(now.year-1,12,31)
+            "CUSTOM" -> (customStart ?: month.atDay(1)) to (customEnd ?: month.atEndOfMonth())
+            else -> month.atDay(1) to month.atEndOfMonth()
+        }
+        val homeStartMillis=homeDates.first.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val homeEndMillis=homeDates.second.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         viewModelScope.launch {
             val previousMessage = _uiState.value.message
             val previousPreview = _uiState.value.importPreview
@@ -120,6 +154,11 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     linkableReceipts = db.searchTransactions("", null, "INCOME", 2000)
                         .filter { it.flowType in setOf(FlowType.INCOME, FlowType.REFUND) },
                     month = month,
+                    homePeriod = homeKey,
+                    homeStart = homeDates.first,
+                    homeEnd = homeDates.second,
+                    homeSummary = db.homeRangeSummary(homeStartMillis,homeEndMillis,platform),
+                    homeRecent = db.homeRangeTransactions(homeStartMillis,homeEndMillis,platform),
                     platformFilter = platform,
                     smallThresholdYuan = smallThresholdYuan,
                     summary = db.summary(month, platform, thresholdCent),
@@ -760,6 +799,11 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
 
 data class BillUiState(
     val month: YearMonth = currentYearMonth(),
+    val homePeriod: String = "MONTH",
+    val homeStart: LocalDate = LocalDate.now().withDayOfMonth(1),
+    val homeEnd: LocalDate = LocalDate.now(),
+    val homeSummary: DashboardSummary = DashboardSummary(),
+    val homeRecent: List<Transaction> = emptyList(),
     val platformFilter: Platform? = null,
     val smallThresholdYuan: Int = 50,
     val summary: DashboardSummary = DashboardSummary(),

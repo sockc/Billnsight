@@ -85,7 +85,8 @@ fun AnalysisScreen(
         }
 
         if(selected=="EXPENSE") {
-            item { SectionHeader("支出","按用途分类；匹配退款与分摊已抵扣") }
+            item { CategoryDonutCard(state.categories,state.summary.netExpenseCent) }
+            item { SectionHeader("分类排行","点击展开对应账单") }
             if(state.categories.isEmpty())
                 item { EmptyFinanceCard("本月暂无支出记录") }
             items(state.categories,key={it.category}) { category ->

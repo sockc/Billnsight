@@ -285,6 +285,8 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onImport=openImport,
                     onPlatformChange=viewModel::setPlatformFilter,
                     onOpenAnalysis={selected=2},
+                    onSelectMonth=viewModel::setHomeMonth,
+                    onSelectPeriod=viewModel::setHomePeriod,
                 )
                 1 -> TransactionsScreen(
                     transactions = state.searchResults,
