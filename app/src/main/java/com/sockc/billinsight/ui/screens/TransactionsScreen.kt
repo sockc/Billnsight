@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Checkbox
@@ -26,13 +27,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.sockc.billinsight.BillUiState
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
 import com.sockc.billinsight.model.LoanRepaymentDetail
+import com.sockc.billinsight.util.toYuanText
+import java.time.YearMonth
+import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun TransactionsScreen(
+    state: BillUiState,
+    onSelectMonth: (YearMonth)->Unit,
+    onSelectPeriod: (String,LocalDate?,LocalDate?)->Unit,
+    onChangeExpenseCategory: (Transaction,String,String)->Unit,
+    onPreviewExpenseCategory: (Transaction)->Unit,
     transactions: List<Transaction>,
     pendingTransactions: List<Transaction>,
     pendingCount: Int,
@@ -53,6 +66,7 @@ fun TransactionsScreen(
     onLoadMore: () -> Unit,
 ) {
     var editing by remember { mutableStateOf<Transaction?>(null) }
+    var editingCategory by remember { mutableStateOf<Transaction?>(null) }
     var editingLoan by remember { mutableStateOf<Transaction?>(null) }
     editingLoan?.let { tx ->
         LoanSplitDialog(transaction=tx,existing=loanDetails[tx.id],
@@ -62,6 +76,15 @@ fun TransactionsScreen(
         mutableStateOf<Set<Long>>(emptySet())
     }
     var bulkDialog by remember { mutableStateOf(false) }
+    editingCategory?.let { tx ->
+        ExpenseCategoryDialog(transaction=tx,
+            affectedCount=if(state.categoryPreviewId==tx.id) state.categoryPreviewCount else null,
+            onDismiss={editingCategory=null},
+            onConfirm={ item, category, scope ->
+                onChangeExpenseCategory(item,category,scope)
+                editingCategory=null
+            })
+    }
     editing?.let { tx ->
         TransactionNatureDialog(
             transaction = tx,
@@ -88,7 +111,7 @@ fun TransactionsScreen(
     }
 
     LazyColumn(Modifier.fillMaxSize(), verticalArrangement=Arrangement.spacedBy(4.dp)) {
-        item { PageTitle("流水", "每日账单清晰分组，点击交易展开详情") }
+        item { DateScopeTitle("流水","按日期查看原始账单",state,onSelectMonth,onSelectPeriod) }
         item { SourceFilterRow(platformFilter, onPlatformChange) }
         item {
             Row(
@@ -139,19 +162,40 @@ fun TransactionsScreen(
                 )
             }
             item {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                LazyRow(
+                    Modifier.fillMaxWidth(),
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=16.dp),
+                    horizontalArrangement=Arrangement.spacedBy(7.dp)
                 ) {
-                    listOf("ALL" to "全部", "EXPENSE" to "支出", "INCOME" to "收入", "OTHER" to "其他")
-                        .forEach { (key, title) ->
-                            FilterChip(
-                                selected = searchFlowFilter == key,
-                                onClick = { onSearchFlowChange(key) },
-                                label = { Text(title) },
-                                shape=RoundedCornerShape(12.dp),
-                            )
+                    listOf(
+                        "ALL" to "全部","OUTFLOW" to "总支出",
+                        "CONSUMPTION" to "消费","RECEIPTS" to "收入",
+                        "REPAYMENT" to "还款","OTHER" to "其他"
+                    ).forEach { (key,label) ->
+                        item {
+                            FilterChip(selected=searchFlowFilter==key,
+                                onClick={onSearchFlowChange(key)},
+                                label={Text(label)},shape=RoundedCornerShape(12.dp))
                         }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),
+                    horizontalArrangement=Arrangement.SpaceBetween,
+                    verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                    val total=when(searchFlowFilter) {
+                        "OUTFLOW" -> state.homeSummary.cashOutflowCent
+                        "CONSUMPTION" -> state.homeSummary.netExpenseCent
+                        "RECEIPTS" -> state.homeSummary.incomeCent
+                        "REPAYMENT" -> state.homeSummary.creditRepaymentCent+state.homeSummary.loanRepaymentCent
+                        else -> null
+                    }
+                    Text(if(total==null) "所选期间 · ${shown.size} 笔已显示" else
+                        "所选期间合计 ${total.toYuanText()}",
+                        color=MaterialTheme.colorScheme.onSurfaceVariant,
+                        style=MaterialTheme.typography.bodySmall)
+                    TextButton(onClick={onSelectPeriod("ALL_HISTORY",null,null)}) {
+                        Text("全部历史")
+                    }
                 }
             }
         }
@@ -187,11 +231,21 @@ fun TransactionsScreen(
                 }
                 TransactionCard(tx,
                     onMerchantClick={editing=tx},
+                    onCategoryClick=if(tx.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) ({
+                        editingCategory=tx
+                        onPreviewExpenseCategory(tx)
+                    }) else null,
                     trailing={
                     Row(Modifier.fillMaxWidth(),
                         horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick={editing=tx}) {
                             Text(if(tx.flowType==FlowType.PENDING) "确认用途" else "修改性质")
+                        }
+                        if(tx.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) {
+                            TextButton(onClick={
+                                editingCategory=tx
+                                onPreviewExpenseCategory(tx)
+                            }) {Text("修改分类")}
                         }
                         if(tx.flowType==FlowType.LOAN_REPAYMENT) {
                             TextButton(onClick={editingLoan=tx}) {
@@ -200,6 +254,33 @@ fun TransactionsScreen(
                         }
                     }
                 })
+            }
+        }
+        if(!reviewMode && platformFilter==null &&
+            searchFlowFilter in setOf("ALL","OUTFLOW","REPAYMENT") &&
+            (searchQuery.isBlank() || "信用卡还款".contains(searchQuery.trim()))) {
+            val manual=state.periodManualRepayments.filter { it.countsAsRepayment }
+            if(manual.isNotEmpty()) {
+                item { SectionHeader("手动补录还款","未关联导入账单，已计入本期还款") }
+                items(manual,key={ "manual_"+it.id }) { tx ->
+                    Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                        shape=RoundedCornerShape(16.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(15.dp),
+                            horizontalArrangement=Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text(tx.cardName,style=MaterialTheme.typography.bodyMedium)
+                                Text(Instant.ofEpochMilli(tx.occurredAt)
+                                    .atZone(ZoneId.systemDefault())
+                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))+
+                                    " · 手动补录信用卡还款",
+                                    style=MaterialTheme.typography.labelSmall,
+                                    color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(tx.amountCent.toYuanText(),
+                                style=MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                }
             }
         }
         if (!reviewMode && shown.size >= searchLimit && searchLimit < 10000) {
