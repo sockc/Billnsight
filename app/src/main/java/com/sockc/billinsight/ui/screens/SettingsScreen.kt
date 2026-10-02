@@ -145,7 +145,7 @@ fun SettingsScreen(
             }
         }
         item {
-            Text("BillInsight V0.2.6 · 本地优先 · 数据安全",
+            Text("BillInsight V0.2.8 · 本地优先 · 数据安全",
                 modifier=Modifier.fillMaxWidth().padding(vertical=16.dp),
                 textAlign=androidx.compose.ui.text.style.TextAlign.Center,
                 style=MaterialTheme.typography.labelSmall,
