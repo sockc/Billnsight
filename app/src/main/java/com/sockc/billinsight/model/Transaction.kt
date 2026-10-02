@@ -48,6 +48,8 @@ data class Transaction(
 
 data class CategoryTotal(val category: String, val amountCent: Long, val count: Int)
 data class MerchantTotal(val merchant: String, val amountCent: Long, val count: Int)
+data class PlatformCategoryRule(val platform: Platform, val merchant: String, val category: String, val affectedCount: Int)
+
 data class DailyTotal(val dayOfMonth: Int, val amountCent: Long, val count: Int)
 
 data class RecurringExpense(
