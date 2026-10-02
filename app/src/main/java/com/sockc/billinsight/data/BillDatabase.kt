@@ -300,6 +300,57 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         } finally {db.endTransaction()}
     }
 
+    /**
+     * Revisit only imported, unreviewed personal expenses left as "其他".
+     * Explicit platform/merchant rules win over the bundled dictionary.
+     * Never change repayment/transfer nature, manual entries or hand-edited rows.
+     */
+    fun reclassifyOtherExpenses(): Pair<Int, Int> {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val candidates = db.query(
+                "transactions", null,
+                "flow_type='EXPENSE' AND category='其他' AND nature_modified=0 " +
+                    "AND source_file<>'手动记账'",
+                null, null, null, null
+            ).use { c ->
+                buildList { while (c.moveToNext()) add(c.toTransaction()) }
+            }
+            val scoped = applyPlatformCategoryRules(candidates)
+            val generic = merchantRules().mapKeys {
+                MerchantCategoryPolicy.normalize(it.key)
+            }
+            val aliases = merchantAliases()
+            var changed = 0
+            candidates.zip(scoped).forEach { (original, resolved) ->
+                val raw = MerchantCategoryPolicy.normalize(original.counterparty)
+                val canonical = aliases[raw]?.let(MerchantCategoryPolicy::normalize) ?: raw
+                val explicit = generic[raw] ?: generic[canonical]
+                val category = when {
+                    resolved.category != "其他" -> resolved.category
+                    explicit != null -> explicit
+                    else -> com.sockc.billinsight.importer.MerchantLexicon.suggest(
+                        original.counterparty, original.description
+                    )
+                }
+                if (category != null && category != "其他" &&
+                    category in TransactionClassifier.categories) {
+                    changed += db.update(
+                        "transactions",
+                        ContentValues().apply { put("category", category) },
+                        "id=? AND nature_modified=0 AND flow_type='EXPENSE' AND category='其他'",
+                        arrayOf(original.id.toString())
+                    )
+                }
+            }
+            db.setTransactionSuccessful()
+            return changed to (candidates.size - changed)
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun platformCategoryRules(): List<com.sockc.billinsight.model.PlatformCategoryRule> {
         val base=readableDatabase.rawQuery(
             """SELECT platform,merchant,category FROM platform_category_rules

@@ -571,6 +571,27 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             deleteProductAlias(key)
         }
 
+    fun reclassifyOtherExpenses() {
+        if (_uiState.value.isLoading) return
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.reclassifyOtherExpenses() }
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                dataAudit = null,
+                message = outcome.fold(
+                    onSuccess = { (changed, remaining) ->
+                        "已重新识别 $changed 笔其他消费，剩余 $remaining 笔需确认；人工分类未改动"
+                    },
+                    onFailure = { it.message ?: "重新识别失败，原始账单未修改" }
+                )
+            )
+            if (outcome.isSuccess) refresh()
+        }
+    }
+
     fun recheckCreditRepayments() {
         if (_uiState.value.isLoading) {
             _uiState.value = _uiState.value.copy(message = "请等待当前操作完成")

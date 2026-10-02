@@ -41,6 +41,7 @@ fun RuleCenterScreen(
     state:BillUiState,
     onBack:()->Unit,
     onPreview:(String)->Unit,
+    onReclassify:()->Unit,
     onSaveCategory:(String,String,Boolean)->Unit,
     onDeleteCategory:(String)->Unit,
     onDeletePlatformCategory:(Platform,String)->Unit,
@@ -60,6 +61,7 @@ fun RuleCenterScreen(
     var categoryMenu by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Pair<String,String>?>(null) }
     var confirmApply by remember { mutableStateOf(false) }
+    var confirmReclassify by remember { mutableStateOf(false) }
 
     fun clearForm() {
         editing=null;source="";target="";productMerchant=""
@@ -100,6 +102,22 @@ fun RuleCenterScreen(
                 }){Text("确认应用")}
             },
             dismissButton={TextButton(onClick={confirmApply=false}){Text("取消")}}
+        )
+    }
+    if (confirmReclassify) {
+        AlertDialog(
+            onDismissRequest = { confirmReclassify = false },
+            title = { Text("重新识别其他消费？") },
+            text = { Text("使用内置商户词库和已保存的规则，重新识别未人工修改的“其他”消费。还款、资金流转和手动分类不会被覆盖。") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmReclassify = false
+                    onReclassify()
+                }) { Text("开始识别") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReclassify = false }) { Text("取消") }
+            }
         )
     }
     if(!confirmApply) editing?.let { kind ->
@@ -246,6 +264,21 @@ fun RuleCenterScreen(
             )
         }
         if(tab=="category") {
+            item {
+                Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=5.dp),
+                    shape=RoundedCornerShape(17.dp)) {
+                    Column(Modifier.padding(15.dp),
+                        verticalArrangement=Arrangement.spacedBy(7.dp)) {
+                        Text("离线商户智能分类", fontWeight=FontWeight.SemiBold)
+                        Text("内置常见品牌、本地小店关键词和交易说明匹配。导入时自动使用，也可以补正已有的“其他”账单。",
+                            style=MaterialTheme.typography.bodySmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(onClick={confirmReclassify=true}) {
+                            Text("重新识别已有其他消费")
+                        }
+                    }
+                }
+            }
             val scoped=state.platformCategoryRules.filter {
                 it.merchant.contains(search,true) || it.category.contains(search,true)
             }
