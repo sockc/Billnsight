@@ -17,6 +17,8 @@ import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.importer.CreditRepaymentDetector
 import com.sockc.billinsight.importer.ScanPaymentClassifier
 import com.sockc.billinsight.importer.TransactionClassifier
+import com.sockc.billinsight.importer.MerchantNatureRule
+import com.sockc.billinsight.importer.MerchantNaturePolicy
 import com.sockc.billinsight.model.LoanRepaymentDetail
 import com.sockc.billinsight.model.LoanRepaymentPolicy
 import com.sockc.billinsight.analysis.MerchantAnalysis
@@ -68,6 +70,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         createLoanDetailsTable(db)
         createFinanceCenterTables(db)
         createScanTables(db)
+        createMerchantNatureRulesTable(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -181,6 +184,25 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         if (oldVersion < 10) {
             migrateAutoTransfers(db)
         }
+        if (oldVersion < 11) {
+            createMerchantNatureRulesTable(db)
+        }
+    }
+
+    private fun createMerchantNatureRulesTable(db:SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS merchant_nature_rules (
+                platform TEXT NOT NULL,
+                merchant TEXT NOT NULL,
+                direction TEXT NOT NULL CHECK(direction IN ('IN','OUT')),
+                flow_type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(platform,merchant,direction)
+            )
+            """.trimIndent()
+        )
     }
 
     /**
@@ -1446,6 +1468,104 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         )
     }
 
+    /** Selecting a named merchant applies one classification to ordinary, matching
+     * same-platform, same-direction rows and saves a rule for future imports.
+     * Hand-corrected and linked transactions, withdrawals, refunds and repayments
+     * are not overwritten. A generic QR placeholder only changes the clicked row. */
+    fun updateMerchantNature(
+        selected:Transaction,flowType:FlowType,category:String,
+        applyMerchant:Boolean,
+    ):Int {
+        val direction=MerchantNaturePolicy.direction(selected.directionText)
+        val propagate=applyMerchant && MerchantNaturePolicy.eligibleMerchant(selected) &&
+            direction!=null && MerchantNaturePolicy.allowsDirection(direction,flowType) &&
+            flowType in setOf(
+                FlowType.EXPENSE,FlowType.INCOME,FlowType.BUSINESS_EXPENSE,
+                FlowType.BUSINESS_INCOME,FlowType.GIFT_EXPENSE,FlowType.GIFT_INCOME
+            )
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            updateNature(selected.id,flowType,category)
+            var changed=0
+            if(propagate && direction!=null) {
+                val sameDirection=if(direction=="IN") "%收入%" else "%支出%"
+                val merchant=selected.counterparty.trim()
+                val candidates=mutableListOf<Long>()
+                db.rawQuery(
+                    """
+                    SELECT id FROM transactions
+                    WHERE counterparty=? AND platform=? AND id<>?
+                      AND direction_text LIKE ? AND nature_modified=0
+                      AND flow_type IN ('EXPENSE','INCOME','PENDING')
+                      AND trade_type NOT LIKE '%退款%'
+                      AND trade_type NOT LIKE '%还款%'
+                      AND trade_type NOT LIKE '%提现%'
+                      AND trade_type NOT LIKE '%充值%'
+                      AND NOT EXISTS(
+                          SELECT 1 FROM transaction_links l
+                          WHERE l.expense_id=transactions.id OR l.receipt_id=transactions.id)
+                      AND NOT EXISTS(
+                          SELECT 1 FROM manual_scan_links m
+                          WHERE m.manual_id=transactions.id OR m.imported_id=transactions.id)
+                    """.trimIndent(),
+                    arrayOf(merchant,selected.platform.name,
+                        selected.id.toString(),sameDirection)
+                ).use { c -> while(c.moveToNext()) candidates+=c.getLong(0) }
+                candidates.forEach { id ->
+                    changed+=db.update(
+                        "transactions",ContentValues().apply {
+                            put("flow_type",flowType.name)
+                            put("category",category)
+                        },"id=? AND nature_modified=0",arrayOf(id.toString())
+                    )
+                }
+                db.insertWithOnConflict("merchant_nature_rules",null,
+                    ContentValues().apply {
+                        put("platform",selected.platform.name)
+                        put("merchant",merchant)
+                        put("direction",direction)
+                        put("flow_type",flowType.name)
+                        put("category",category)
+                        put("updated_at",System.currentTimeMillis())
+                    },SQLiteDatabase.CONFLICT_REPLACE
+                )
+            }
+            db.setTransactionSuccessful()
+            return changed
+        } finally { db.endTransaction() }
+    }
+
+    fun merchantNatureRules():Map<Triple<Platform,String,String>,MerchantNatureRule> {
+        readableDatabase.rawQuery(
+            "SELECT platform,merchant,direction,flow_type,category FROM merchant_nature_rules",
+            null
+        ).use { c ->
+            return buildMap {
+                while(c.moveToNext()) {
+                    val rule=MerchantNatureRule(
+                        Platform.valueOf(c.getString(0)),c.getString(1),
+                        c.getString(2),FlowType.valueOf(c.getString(3)),c.getString(4)
+                    )
+                    put(Triple(rule.platform,rule.counterparty,rule.direction),rule)
+                }
+            }
+        }
+    }
+
+    fun applyMerchantNatureRules(rows:List<Transaction>):List<Transaction> {
+        val rules=merchantNatureRules()
+        if(rules.isEmpty()) return rows
+        return rows.map { tx ->
+            val direction=MerchantNaturePolicy.direction(tx.directionText)
+            MerchantNaturePolicy.apply(tx,
+                direction?.let {
+                    rules[Triple(tx.platform,tx.counterparty.trim(),it)]
+                }
+            )
+        }
+    }
+
     fun updateNature(id: Long, flowType: FlowType, category: String) {
         require(id > 0) { "无效流水" }
         require(category.isNotBlank()) { "请选择分类" }
@@ -1940,6 +2060,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 10
+        private const val DB_VERSION = 11
     }
 }

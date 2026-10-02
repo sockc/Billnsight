@@ -170,9 +170,12 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             val outcome=runCatching {
                 withContext(Dispatchers.IO) {
-                    val parsed=importer.parse(
+                    val raw=importer.parse(
                         uri,synchronized(db) { db.merchantRules() },zipPassword
                     )
+                    val parsed=synchronized(db) {
+                        raw.copy(transactions=db.applyMerchantNatureRules(raw.transactions))
+                    }
                     val fingerprints=synchronized(db) {
                         db.existingFingerprints(parsed.transactions.map { it.fingerprint })
                     }
@@ -642,17 +645,31 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    fun updateNature(transaction: Transaction, flowType: FlowType, category: String) {
+    fun updateNature(
+        transaction:Transaction,flowType:FlowType,category:String,
+        applyMerchant:Boolean=false,
+    ) {
         viewModelScope.launch {
-            val saved = runCatching {
+            val saved=runCatching {
                 withContext(Dispatchers.IO) {
-                    synchronized(db) { db.updateNature(transaction.id, flowType, category) }
+                    synchronized(db) {
+                        db.updateMerchantNature(transaction,flowType,category,applyMerchant)
+                    }
                 }
             }
-            _uiState.value = _uiState.value.copy(
-                message = if (saved.isSuccess) "交易性质已保存" else saved.exceptionOrNull()?.message ?: "保存失败"
+            _uiState.value=_uiState.value.copy(
+                message=saved.fold(
+                    onSuccess={ updated ->
+                        if(applyMerchant && updated>0)
+                            "已修改该商家，并自动归类另外 "+updated+" 笔历史流水；以后导入自动沿用"
+                        else if(applyMerchant)
+                            "已修改；同名同平台的普通流水将自动沿用，已确认或特殊流水保留原分类"
+                        else "交易性质已保存"
+                    },
+                    onFailure={it.message?:"保存失败"}
+                )
             )
-            if (saved.isSuccess) refresh()
+            if(saved.isSuccess) refresh()
         }
     }
 

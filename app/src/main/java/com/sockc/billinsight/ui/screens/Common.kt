@@ -222,7 +222,11 @@ fun PlatformBadge(platform: Platform) {
 }
 
 @Composable
-fun TransactionCard(item: Transaction, trailing: @Composable (() -> Unit)? = null) {
+fun TransactionCard(
+    item:Transaction,
+    trailing:@Composable (() -> Unit)?=null,
+    onMerchantClick:(()->Unit)?=null,
+) {
     var expanded by remember(item.id) { mutableStateOf(false) }
     val incoming=item.directionText.contains("收入")
     val outgoing=item.directionText.contains("支出")
@@ -246,6 +250,8 @@ fun TransactionCard(item: Transaction, trailing: @Composable (() -> Unit)? = nul
                 }
                 Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)) {
                     Text(item.counterparty.ifBlank { item.description.ifBlank { "未知交易" } },
+                        modifier=if(onMerchantClick!=null) Modifier.clickable(onClick=onMerchantClick)
+                            else Modifier,
                         fontWeight=FontWeight.SemiBold,
                         style=MaterialTheme.typography.bodyMedium,maxLines=1,
                         overflow=TextOverflow.Ellipsis)

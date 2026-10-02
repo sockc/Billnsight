@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.importer.TransactionClassifier
+import com.sockc.billinsight.importer.MerchantNaturePolicy
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.Transaction
 import com.sockc.billinsight.model.displayName
@@ -31,7 +32,7 @@ import com.sockc.billinsight.util.toYuanText
 fun TransactionNatureDialog(
     transaction: Transaction,
     onDismiss: () -> Unit,
-    onConfirm: (Transaction, FlowType, String) -> Unit,
+    onConfirm: (Transaction, FlowType, String, Boolean) -> Unit,
 ) {
     val incoming = transaction.directionText.contains("收入") ||
         transaction.flowType in setOf(
@@ -60,7 +61,11 @@ fun TransactionNatureDialog(
             Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                 Text(transaction.counterparty.ifBlank { transaction.description })
                 Text(transaction.amountCent.toYuanText())
-                Text("只调整这一笔交易，不自动决定同一收付款人的其他交易。")
+                Text(
+                    if (MerchantNaturePolicy.eligibleMerchant(transaction))
+                        "保存后自动归类同平台、同名商家的其他普通流水；已人工确认的记录不覆盖。"
+                    else "通用扫码名称或无明确商户的交易仅修改这一笔。"
+                )
                 options.forEach { choice ->
                     Row(
                         Modifier.fillMaxWidth().clickable { nature = choice },
@@ -104,7 +109,10 @@ fun TransactionNatureDialog(
                         FlowType.IGNORE -> "忽略"
                         FlowType.PENDING -> "待确认"
                     }
-                    onConfirm(transaction, selected, resolvedCategory)
+                    onConfirm(
+                        transaction,selected,resolvedCategory,
+                        MerchantNaturePolicy.eligibleMerchant(transaction)
+                    )
                 }
             ) { Text("保存") }
         },

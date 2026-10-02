@@ -35,7 +35,7 @@ fun TransactionsScreen(
     onReviewModeChange: (Boolean) -> Unit,
     platformFilter: Platform?,
     onPlatformChange: (Platform?) -> Unit,
-    onNatureChange: (Transaction, FlowType, String) -> Unit,
+    onNatureChange: (Transaction, FlowType, String, Boolean) -> Unit,
     loanDetails: Map<Long,LoanRepaymentDetail>,
     onSaveLoan: (Long,Long,Long,Long) -> Unit,
     onClearLoan: (Long) -> Unit,
@@ -61,8 +61,8 @@ fun TransactionsScreen(
         TransactionNatureDialog(
             transaction = tx,
             onDismiss = { editing = null },
-            onConfirm = { item, nature, category ->
-                onNatureChange(item, nature, category)
+            onConfirm = { item, nature, category, applyMerchant ->
+                onNatureChange(item, nature, category, applyMerchant)
                 editing = null
             },
         )
@@ -175,7 +175,9 @@ fun TransactionsScreen(
                         )
                     }
                 }
-                TransactionCard(tx) {
+                TransactionCard(tx,
+                    onMerchantClick={editing=tx},
+                    trailing={
                     Row(Modifier.fillMaxWidth(),
                         horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick={editing=tx}) {
@@ -187,7 +189,7 @@ fun TransactionsScreen(
                             }
                         }
                     }
-                }
+                })
             }
         }
         if (!reviewMode && shown.size >= searchLimit && searchLimit < 10000) {

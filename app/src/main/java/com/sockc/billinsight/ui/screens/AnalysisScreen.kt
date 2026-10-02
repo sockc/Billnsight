@@ -1,11 +1,20 @@
 package com.sockc.billinsight.ui.screens
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,210 +27,292 @@ import com.sockc.billinsight.BillUiState
 import com.sockc.billinsight.analysis.CounterpartyAnalysis
 import com.sockc.billinsight.analysis.CounterpartySummary
 import com.sockc.billinsight.model.FlowType
-import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
 import com.sockc.billinsight.util.toYuanText
 
 @Composable
 fun AnalysisScreen(
     state:BillUiState,
-    onPlatformChange:(Platform?)->Unit,
+    onPlatformChange:(com.sockc.billinsight.model.Platform?)->Unit,
     onPrevious:()->Unit,
     onNext:()->Unit,
 ) {
+    var selected by remember { mutableStateOf("EXPENSE") }
     val income=CounterpartyAnalysis.incomeSources(
         state.monthlyTransactions,state.linkedReceiptIds)
     val people=CounterpartyAnalysis.people(state.monthlyTransactions)
-    val moneyIn=people.filter { it.receivedCount>0 }
-        .sortedByDescending { it.receivedCent }
-    val moneyOut=people.filter { it.sentCount>0 }
-        .sortedByDescending { it.sentCent }
-    val credits=state.monthlyTransactions
+    val received=people.sumOf { it.receivedCent }
+    val sent=people.sumOf { it.sentCent }
+    val transferred=received+sent
+    val credit=state.monthlyTransactions
         .filter { it.flowType==FlowType.CREDIT_REPAYMENT }
         .groupBy {
             val raw=it.counterparty.trim().ifBlank { "未识别信用卡" }
             state.creditCenter.aliases[raw.lowercase()] ?: raw
         }
-    val manualCredits=if(state.platformFilter==null)
+    val manual=if(state.platformFilter==null)
         state.creditCenter.manual.filter { it.countsAsRepayment }
             .groupBy { it.cardName } else emptyMap()
-    val creditNames=(credits.keys+manualCredits.keys).distinct()
-        .sortedByDescending { key ->
-            credits[key].orEmpty().sumOf { it.amountCent }+
-                manualCredits[key].orEmpty().sumOf { it.amountCent }
-        }
+    val creditNames=(credit.keys+manual.keys).distinct().sortedByDescending { key ->
+        credit[key].orEmpty().sumOf { it.amountCent }+
+            manual[key].orEmpty().sumOf { it.amountCent }
+    }
+    val loans=state.monthlyTransactions.filter {
+        it.flowType==FlowType.LOAN_REPAYMENT
+    }.groupBy { it.counterparty.trim().ifBlank { "未知贷款机构" } }
 
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(5.dp)) {
-        item {PageTitle("收支分析","看清钱花在哪、谁给你的钱、给谁转了多少")}
-        item {MonthHeader(state.month,onPrevious,onNext)}
-        item {SourceFilterRow(state.platformFilter,onPlatformChange)}
+        item { PageTitle("收支分析","选择分类，一眼看清资金去向和来源") }
+        item { MonthHeader(state.month,onPrevious,onNext) }
+        item { SourceFilterRow(state.platformFilter,onPlatformChange) }
         item {
-            Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=5.dp),
-                shape=RoundedCornerShape(21.dp),
-                colors=CardDefaults.cardColors(
-                    containerColor=MaterialTheme.colorScheme.primaryContainer)) {
-                Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                    Text("消费与转账支出",style=MaterialTheme.typography.titleSmall)
-                    Text(state.summary.netExpenseCent.toYuanText(),
-                        style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Bold)
-                    Text("收入 "+state.summary.incomeCent.toYuanText()+
-                        "  ·  信用卡还款 "+state.summary.creditRepaymentCent.toYuanText(),
-                        style=MaterialTheme.typography.bodySmall)
-                    Text("提现、充值和还款单列；匹配退款按原消费抵扣",
-                        style=MaterialTheme.typography.labelSmall)
+            Column(Modifier.padding(horizontal=16.dp,vertical=6.dp),
+                verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                    AnalysisModeCard("支出",state.summary.netExpenseCent,
+                        selected=="EXPENSE",Modifier.weight(1f)){selected="EXPENSE"}
+                    AnalysisModeCard("收入",state.summary.incomeCent,
+                        selected=="INCOME",Modifier.weight(1f)){selected="INCOME"}
+                }
+                Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                    AnalysisModeCard("资金往来",transferred,
+                        selected=="TRANSFER",Modifier.weight(1f)){selected="TRANSFER"}
+                    AnalysisModeCard("还款",
+                        state.summary.creditRepaymentCent+state.summary.loanRepaymentCent,
+                        selected=="REPAYMENT",Modifier.weight(1f)){selected="REPAYMENT"}
                 }
             }
         }
-        item {SectionHeader("钱花哪了","已扣匹配退款，点击分类查看原始账单")}
-        if(state.categories.isEmpty())
-            item {EmptyFinanceCard("本月还没有消费或转账支出")}
-        items(state.categories,key={it.category}) { category ->
-            val detail=state.monthlyTransactions.filter {
-                if(category.category=="金融费用")
-                    it.flowType==FlowType.LOAN_REPAYMENT &&
-                        state.loanDetails[it.id]?.financeCostCent?.let { cost ->cost>0 }==true
-                else it.category==category.category &&
-                    it.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)
-            }
-            var open by remember(state.month,state.platformFilter) {
-                mutableStateOf(false)
-            }
-            Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
-                shape=RoundedCornerShape(17.dp)) {
-                Column {
-                    Row(Modifier.fillMaxWidth().clickable {open=!open}.padding(14.dp),
-                        horizontalArrangement=Arrangement.SpaceBetween) {
-                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                            CategoryBadge(category.category)
-                            Text(category.count.toString()+" 笔 · "+
-                                if(open)"收起明细 ▲" else "查看明细 ▼",
-                                style=MaterialTheme.typography.labelSmall,
-                                color=MaterialTheme.colorScheme.onSurfaceVariant)
+
+        if(selected=="EXPENSE") {
+            item { SectionHeader("支出","按用途分类；匹配退款与分摊已抵扣") }
+            if(state.categories.isEmpty())
+                item { EmptyFinanceCard("本月暂无支出记录") }
+            items(state.categories,key={it.category}) { category ->
+                val detail=state.monthlyTransactions.filter {
+                    if(category.category=="金融费用")
+                        it.flowType==FlowType.LOAN_REPAYMENT &&
+                            (state.loanDetails[it.id]?.financeCostCent?:0)>0
+                    else it.category==category.category &&
+                        it.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)
+                }
+                var open by remember(state.month,state.platformFilter,category.category) {
+                    mutableStateOf(false)
+                }
+                Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                    shape=RoundedCornerShape(17.dp)) {
+                    Column {
+                        Row(Modifier.fillMaxWidth().clickable {open=!open}.padding(15.dp),
+                            horizontalArrangement=Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f),
+                                verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                                CategoryBadge(category.category)
+                                Text(category.count.toString()+" 笔 · "+
+                                    if(open)"收起 ▲" else "查看流水 ▼",
+                                    style=MaterialTheme.typography.labelSmall,
+                                    color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(category.amountCent.toYuanText(),
+                                fontWeight=FontWeight.Bold,
+                                style=MaterialTheme.typography.titleMedium)
                         }
-                        Text(category.amountCent.toYuanText(),
-                            style=MaterialTheme.typography.titleMedium,
-                            fontWeight=FontWeight.Bold)
-                    }
-                    if(open) {
-                        HorizontalDivider()
-                        detail.forEach {tx ->TransactionCard(tx)}
-                        if(category.category=="金融费用")
-                            Text("仅明确拆分的贷款利息及手续费计为金融费用",
-                                modifier=Modifier.padding(14.dp),
-                                style=MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        }
-        item {SectionHeader("收入从哪里来","按付款方统计金额和次数")}
-        if(income.isEmpty()) item {EmptyFinanceCard("本月暂无已识别收入")}
-        items(income,key={"income_"+it.platform.name+"_"+it.name}) {
-            PersonRow(it,"收入",it.receivedCent,it.receivedCount,false)
-        }
-        item {SectionHeader("谁给我转了钱","每个人的次数、总额与双向交易")}
-        if(moneyIn.isEmpty()) item {EmptyFinanceCard("本月暂无转账收入")}
-        items(moneyIn,key={"received_"+it.platform.name+"_"+it.name}) {
-            PersonRow(it,"转给我",it.receivedCent,it.receivedCount,true)
-        }
-        item {SectionHeader("我给谁转了钱","每个人的次数、总额与双向交易")}
-        if(moneyOut.isEmpty()) item {EmptyFinanceCard("本月暂无转账支出")}
-        items(moneyOut,key={"sent_"+it.platform.name+"_"+it.name}) {
-            PersonRow(it,"我转给他",it.sentCent,it.sentCount,true)
-        }
-        item {SectionHeader("信用卡还款","按原始收款方分组，不重复算作消费")}
-        item {
-            Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
-                shape=RoundedCornerShape(18.dp)) {
-                Row(Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement=Arrangement.SpaceBetween) {
-                    Text("本月还款",style=MaterialTheme.typography.titleMedium)
-                    Text(state.summary.creditRepaymentCent.toYuanText(),
-                        style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
-                }
-            }
-        }
-        if(creditNames.isEmpty()) item {EmptyFinanceCard("本月未从已导入账单识别到信用卡还款")}
-        items(creditNames,key={it}) { name ->
-            val originals=credits[name].orEmpty()
-            val entered=manualCredits[name].orEmpty()
-            var open by remember(state.month,state.platformFilter) {mutableStateOf(false)}
-            Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
-                shape=RoundedCornerShape(17.dp)) {
-                Column {
-                    Row(Modifier.fillMaxWidth().clickable{open=!open}.padding(14.dp),
-                        horizontalArrangement=Arrangement.SpaceBetween) {
-                        Column(Modifier.weight(1f)) {
-                            Text(name,fontWeight=FontWeight.SemiBold)
-                            Text((originals.size+entered.size).toString()+" 笔 · "+
-                                if(open)"收起 ▲" else "查看明细 ▼",
-                                style=MaterialTheme.typography.bodySmall)
-                        }
-                        Text((originals.sumOf{it.amountCent}+
-                            entered.sumOf{it.amountCent}).toYuanText(),
-                            fontWeight=FontWeight.Bold)
-                    }
-                    if(open) {
-                        originals.forEach {TransactionCard(it)}
-                        entered.forEach {
-                            Text("原有手动补录 · "+it.amountCent.toYuanText(),
-                                modifier=Modifier.padding(14.dp),
+                        if(open) {
+                            HorizontalDivider()
+                            detail.forEach { TransactionCard(it) }
+                            if(category.category=="金融费用") Text(
+                                "金融费用只计明确拆分的贷款利息及手续费",
+                                modifier=Modifier.padding(13.dp),
                                 style=MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
-        }
-        if(state.summary.withdrawalCent>0L || state.summary.loanRepaymentCent>0L)
+        } else if(selected=="INCOME") {
+            item { SectionHeader("收入","按付款人统计总额、次数和明细") }
+            if(income.isEmpty()) item {EmptyFinanceCard("本月暂无收入记录")}
+            items(income,key={"income_"+it.platform.name+"_"+it.name}) {
+                CounterpartyCard(it,showTransfer=false)
+            }
+        } else if(selected=="TRANSFER") {
             item {
-                Text("资金提现 "+state.summary.withdrawalCent.toYuanText()+
-                    " · 贷款还款 "+state.summary.loanRepaymentCent.toYuanText()+
-                    "（均另行统计）",
+                Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                    shape=RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(15.dp),
+                        verticalArrangement=Arrangement.spacedBy(7.dp)) {
+                        Text("资金往来",fontWeight=FontWeight.Bold,
+                            style=MaterialTheme.typography.titleMedium)
+                        Text("转入 "+received.toYuanText()+
+                            " · 转出 "+sent.toYuanText(),
+                            style=MaterialTheme.typography.bodyMedium)
+                        Text("仅普通转账；不包含扫码购物、提现和信用卡还款",
+                            style=MaterialTheme.typography.bodySmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if(people.isEmpty()) item {EmptyFinanceCard("本月暂无转账往来")}
+            items(people,key={"transfer_"+it.platform.name+"_"+it.name}) {
+                CounterpartyCard(it,showTransfer=true)
+            }
+            item {
+                Text("同名的微信和支付宝账户暂时分开统计，避免误把不同的人合并。",
                     modifier=Modifier.padding(horizontal=20.dp,vertical=10.dp),
                     style=MaterialTheme.typography.bodySmall,
                     color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        item {
-            Text("同名收付款人如果分属微信和支付宝，会分别显示；未验证身份前不自动合并。",
-                modifier=Modifier.padding(horizontal=20.dp,vertical=15.dp),
-                style=MaterialTheme.typography.bodySmall,
-                color=MaterialTheme.colorScheme.onSurfaceVariant)
+        } else if(selected=="REPAYMENT") {
+            item {SectionHeader("还款","信用卡与贷款独立统计，不重复计入消费")}
+            item {
+                Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                    shape=RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(16.dp),
+                        verticalArrangement=Arrangement.spacedBy(7.dp)) {
+                        Text("本月还款合计",style=MaterialTheme.typography.titleSmall)
+                        Text((state.summary.creditRepaymentCent+
+                            state.summary.loanRepaymentCent).toYuanText(),
+                            style=MaterialTheme.typography.headlineMedium,
+                            fontWeight=FontWeight.Bold)
+                        Text("信用卡 "+state.summary.creditRepaymentCent.toYuanText()+
+                            "（"+state.summary.creditRepaymentCount+" 笔）",
+                            style=MaterialTheme.typography.bodySmall)
+                        Text("贷款 "+state.summary.loanRepaymentCent.toYuanText()+
+                            "（"+state.summary.loanRepaymentCount+" 笔）",
+                            style=MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            item { SectionHeader("信用卡","按收款机构查看还款笔数和金额") }
+            if(creditNames.isEmpty())
+                item {EmptyFinanceCard("本月暂无已识别的信用卡还款")}
+            items(creditNames,key={"credit_"+it}) { name ->
+                val originals=credit[name].orEmpty()
+                val supplements=manual[name].orEmpty()
+                var open by remember(state.month,state.platformFilter,name) {
+                    mutableStateOf(false)
+                }
+                Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                    shape=RoundedCornerShape(17.dp)) {
+                    Column {
+                        Row(Modifier.fillMaxWidth().clickable {open=!open}.padding(14.dp),
+                            horizontalArrangement=Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text(name,fontWeight=FontWeight.SemiBold)
+                                Text((originals.size+supplements.size).toString()+" 笔 · "+
+                                    if(open)"收起 ▲" else "查看流水 ▼",
+                                    style=MaterialTheme.typography.bodySmall)
+                            }
+                            Text((originals.sumOf {it.amountCent}+
+                                supplements.sumOf {it.amountCent}).toYuanText(),
+                                fontWeight=FontWeight.Bold)
+                        }
+                        if(open) {
+                            originals.forEach {TransactionCard(it)}
+                            supplements.forEach {
+                                Text("原有手动补录 · "+it.amountCent.toYuanText(),
+                                    modifier=Modifier.padding(14.dp),
+                                    style=MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+            item {SectionHeader("贷款","按机构汇总还款，已拆分的本金利息保留")}
+            if(loans.isEmpty()) item {EmptyFinanceCard("本月暂无贷款还款")}
+            items(loans.toList(),key={"loan_"+it.first}) { (name,transactions) ->
+                var open by remember(state.month,state.platformFilter,name) {
+                    mutableStateOf(false)
+                }
+                Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                    shape=RoundedCornerShape(17.dp)) {
+                    Column {
+                        Row(Modifier.fillMaxWidth().clickable {open=!open}.padding(14.dp),
+                            horizontalArrangement=Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text(name,fontWeight=FontWeight.SemiBold)
+                                Text(transactions.size.toString()+" 笔 · "+
+                                    if(open)"收起 ▲" else "查看流水 ▼",
+                                    style=MaterialTheme.typography.bodySmall)
+                            }
+                            Text(transactions.sumOf {it.amountCent}.toYuanText(),
+                                fontWeight=FontWeight.Bold)
+                        }
+                        if(open) transactions.forEach {TransactionCard(it)}
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun PersonRow(
-    group:CounterpartySummary,
-    caption:String,total:Long,count:Int,showBoth:Boolean,
+private fun AnalysisModeCard(
+    title:String,amount:Long,selected:Boolean,modifier:Modifier,
+    onClick:()->Unit,
 ) {
-    var open by remember(group.platform,group.name) {mutableStateOf(false)}
+    Card(
+        modifier.clickable(onClick=onClick),
+        colors=CardDefaults.cardColors(
+            containerColor=if(selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surface
+        ),
+        shape=RoundedCornerShape(19.dp)
+    ) {
+        Column(Modifier.padding(15.dp),
+            verticalArrangement=Arrangement.spacedBy(7.dp)) {
+            Text(title,style=MaterialTheme.typography.titleSmall,
+                fontWeight=if(selected) FontWeight.Bold else FontWeight.Medium,
+                color=if(selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface)
+            Text(amount.toYuanText(),
+                style=MaterialTheme.typography.titleLarge,
+                fontWeight=FontWeight.Bold,maxLines=1)
+        }
+    }
+}
+
+@Composable
+private fun CounterpartyCard(group:CounterpartySummary,showTransfer:Boolean) {
+    var open by remember(group.platform,group.name,showTransfer) {
+        mutableStateOf(false)
+    }
+    val total=if(showTransfer) group.receivedCent+group.sentCent
+        else group.receivedCent
     Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
         shape=RoundedCornerShape(17.dp)) {
         Column {
-            Row(Modifier.fillMaxWidth().clickable{open=!open}.padding(14.dp),
+            Row(Modifier.fillMaxWidth().clickable {open=!open}.padding(15.dp),
                 horizontalArrangement=Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)) {
-                    Text(group.name,style=MaterialTheme.typography.titleSmall,
-                        fontWeight=FontWeight.SemiBold)
-                    Row(horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                        PlatformBadge(group.platform)
-                        Text(caption+" "+count.toString()+" 次 · "+
-                            if(open)"收起 ▲" else "查看流水 ▼",
-                            style=MaterialTheme.typography.labelSmall)
+                Column(Modifier.weight(1f),
+                    verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                    Text(group.name,fontWeight=FontWeight.SemiBold,
+                        style=MaterialTheme.typography.titleSmall)
+                    PlatformBadge(group.platform)
+                    if(showTransfer) {
+                        Text("转入 "+group.receivedCount+" 次 / "+
+                            group.receivedCent.toYuanText(),
+                            style=MaterialTheme.typography.bodySmall)
+                        Text("转出 "+group.sentCount+" 次 / "+
+                            group.sentCent.toYuanText(),
+                            style=MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text(group.receivedCount.toString()+" 笔收入",
+                            style=MaterialTheme.typography.bodySmall)
                     }
                 }
-                Text(total.toYuanText(),style=MaterialTheme.typography.titleMedium,
-                    fontWeight=FontWeight.Bold)
+                Column {
+                    Text(total.toYuanText(),fontWeight=FontWeight.Bold,
+                        style=MaterialTheme.typography.titleMedium)
+                    Text(if(open)"收起 ▲" else "明细 ▼",
+                        style=MaterialTheme.typography.labelSmall,
+                        color=MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             if(open) {
                 HorizontalDivider()
-                if(showBoth) {
-                    Text("他给我："+group.receivedCount.toString()+" 次 / "+
-                        group.receivedCent.toYuanText()+"；我给他："+group.sentCount+
-                        " 次 / "+group.sentCent.toYuanText(),
-                        modifier=Modifier.padding(12.dp),
-                        style=MaterialTheme.typography.bodySmall)
-                }
+                if(showTransfer) Text(
+                    "往来差额（转入－转出）："+group.differenceCent.toYuanText(),
+                    modifier=Modifier.padding(horizontal=15.dp,vertical=9.dp),
+                    style=MaterialTheme.typography.bodySmall)
                 group.records.forEach {TransactionCard(it)}
             }
         }
