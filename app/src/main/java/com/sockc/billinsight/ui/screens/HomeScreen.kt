@@ -57,6 +57,8 @@ fun HomeScreen(
     onReviewPending: () -> Unit,
     onOpenAnalysis: () -> Unit,
     onRecheckCredit: () -> Unit,
+    onOpenCreditCenter: () -> Unit,
+    onOpenLoanCenter: () -> Unit,
 ) {
     val current=state.summary.netExpenseCent
     val previous=state.previousSummary.netExpenseCent
@@ -157,7 +159,8 @@ fun HomeScreen(
                     HomeMetricCard(
                         label="贷款还款",amount=state.summary.loanRepaymentCent,
                         hint="${state.summary.loanRepaymentCount} 笔 · 待拆分 ${state.summary.loanUnallocatedCent.toYuanText()}",
-                        tint=Color(0xFFCB9444),modifier=Modifier.weight(1f))
+                        tint=Color(0xFFCB9444),modifier=Modifier.weight(1f),
+                        onClick=onOpenLoanCenter)
                 }
             }
         }
@@ -167,7 +170,10 @@ fun HomeScreen(
                 SectionHeader(
                     "信用卡还款明细",
                     "${state.month.year}年${state.month.monthValue}月 · ${platformLabel(state.platformFilter)} · " +
-                        "${creditTransactions.size} 笔"
+                        "${creditTransactions.size} 笔",
+                    trailing={
+                        TextButton(onClick=onOpenCreditCenter){Text("管理卡片 ›")}
+                    }
                 )
             }
             if (creditTransactions.isEmpty()) {

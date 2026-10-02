@@ -1,6 +1,7 @@
 package com.sockc.billinsight.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,6 +45,12 @@ import com.sockc.billinsight.ui.screens.DiscoverScreen
 import com.sockc.billinsight.ui.screens.HomeScreen
 import com.sockc.billinsight.ui.screens.SettingsScreen
 import com.sockc.billinsight.ui.screens.TransactionsScreen
+import com.sockc.billinsight.ui.screens.CreditCenterScreen
+import com.sockc.billinsight.ui.screens.LoanCenterScreen
+import com.sockc.billinsight.ui.screens.RuleCenterScreen
+import com.sockc.billinsight.ui.screens.TrendScreen
+import com.sockc.billinsight.ui.screens.ImportPreviewDialog
+import com.sockc.billinsight.model.FlowType
 
 private data class Destination(val label: String, val icon: ImageVector)
 
@@ -51,6 +58,8 @@ private data class Destination(val label: String, val icon: ImageVector)
 fun BillInsightApp(viewModel: BillInsightViewModel) {
     val state by viewModel.uiState.collectAsState()
     var selected by remember { mutableIntStateOf(0) }
+    var detailPage by remember { mutableStateOf<String?>(null) }
+    BackHandler(enabled=detailPage!=null) { detailPage=null }
     var reviewMode by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val destinations = remember {
@@ -158,6 +167,34 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
         )
     }
 
+    state.importPreview?.let { preview ->
+        ImportPreviewDialog(
+            preview=preview,
+            loading=state.isLoading,
+            onConfirm=viewModel::confirmImport,
+            onDismiss=viewModel::cancelImportPreview
+        )
+    }
+
+    state.lastImportResult?.let { report ->
+        AlertDialog(
+            onDismissRequest=viewModel::clearImportReport,
+            title={Text("账单导入报告")},
+            text={
+                androidx.compose.foundation.layout.Column {
+                    Text("来源："+report.platform.name+" · "+report.sourceName)
+                    Text("解析 "+report.parsed+" 笔，新增 "+report.inserted+
+                        " 笔，重复 "+report.duplicated+" 笔")
+                    Text("已忽略 "+report.ignored+" 笔")
+                    Text("可到流水页查看所有导入记录及其识别性质。")
+                }
+            },
+            confirmButton={
+                TextButton(onClick=viewModel::clearImportReport){Text("完成")}
+            },
+        )
+    }
+
     if (state.needsZipPassword) {
         AlertDialog(
             onDismissRequest = viewModel::cancelZipPassword,
@@ -177,7 +214,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                         zipPassword = ""
                     },
                     enabled = zipPassword.isNotBlank(),
-                ) { Text("解压并导入") }
+                ) { Text("解压并预览") }
             },
             dismissButton = {
                 TextButton(onClick = {
@@ -192,7 +229,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
         snackbarHost = { SnackbarHost(snackbar) },
         containerColor=MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar(
+            if(detailPage==null) NavigationBar(
                 containerColor=MaterialTheme.colorScheme.surface,
                 tonalElevation=1.dp,
             ) {
@@ -209,7 +246,46 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            when (selected) {
+            when (detailPage) {
+                "credit" -> CreditCenterScreen(
+                    state=state,
+                    onBack={detailPage=null},
+                    onPrevious=viewModel::previousMonth,
+                    onNext=viewModel::nextMonth,
+                    onAdd=viewModel::addManualCredit,
+                    onLink=viewModel::linkManualCredit,
+                    onUnlink=viewModel::unlinkManualCredit,
+                    onDelete=viewModel::deleteManualCredit,
+                    onRename=viewModel::renameCreditCard,
+                    onConfirmSuspected={
+                        viewModel.updateNature(it,FlowType.CREDIT_REPAYMENT,"信用卡还款")
+                    }
+                )
+                "loans" -> LoanCenterScreen(
+                    state=state,onBack={detailPage=null},
+                    onPrevious=viewModel::previousMonth,onNext=viewModel::nextMonth,
+                    onSaveProfile=viewModel::saveLoanProfile,
+                    onDeleteProfile=viewModel::deleteLoanProfile,
+                    onSaveSplit=viewModel::saveLoanDetail,
+                    onClearSplit=viewModel::clearLoanDetail
+                )
+                "rules" -> RuleCenterScreen(
+                    state=state,onBack={detailPage=null},
+                    onPreview=viewModel::previewCategoryRule,
+                    onSaveCategory=viewModel::saveCategoryRule,
+                    onDeleteCategory=viewModel::deleteCategoryRule,
+                    onSaveMerchantAlias=viewModel::saveMerchantAlias,
+                    onDeleteMerchantAlias=viewModel::deleteMerchantAlias,
+                    onSaveProductAlias=viewModel::saveProductAlias,
+                    onDeleteProductAlias=viewModel::deleteProductAlias
+                )
+                "trends" -> TrendScreen(
+                    state=state,onBack={detailPage=null},
+                    onSelect=viewModel::selectTrendRange,
+                    onClear=viewModel::clearTrendSelection,
+                    onPlatformChange=viewModel::setPlatformFilter
+                )
+                else -> when (selected) {
                 0 -> HomeScreen(
                     state = state,
                     onPrevious = viewModel::previousMonth,
@@ -219,6 +295,8 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onReviewPending = { reviewMode = true; selected = 1 },
                     onOpenAnalysis = { selected = 2 },
                     onRecheckCredit = viewModel::recheckCreditRepayments,
+                    onOpenCreditCenter={detailPage="credit"},
+                    onOpenLoanCenter={detailPage="loans"},
                 )
                 1 -> TransactionsScreen(
                     transactions = state.searchResults,
@@ -264,7 +342,12 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onRunAudit = viewModel::runDataAudit,
                     onOpenAnalysis = { selected = 2 },
                     onOpenPending = { reviewMode = true; selected = 1 },
+                    onOpenCredit={detailPage="credit"},
+                    onOpenLoan={detailPage="loans"},
+                    onOpenRules={detailPage="rules"},
+                    onOpenTrends={detailPage="trends"},
                 )
+                }
             }
 
             if (state.isLoading) {

@@ -11,6 +11,7 @@ import com.sockc.billinsight.data.BillDatabase
 import com.sockc.billinsight.data.BackupManager
 import com.sockc.billinsight.data.DataAuditReport
 import com.sockc.billinsight.importer.BillImporter
+import com.sockc.billinsight.importer.ImportReview
 import com.sockc.billinsight.importer.PasswordRequiredException
 import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.DailyTotal
@@ -18,6 +19,12 @@ import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.ImportResult
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.LoanRepaymentDetail
+import com.sockc.billinsight.model.ImportPreview
+import com.sockc.billinsight.model.CreditCenter
+import com.sockc.billinsight.model.LoanProfile
+import com.sockc.billinsight.model.ManualCreditRepayment
+import com.sockc.billinsight.model.MerchantRule
+import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.model.LinkKind
 import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
@@ -42,6 +49,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     private val importer = BillImporter(application, application.contentResolver)
     private val backupManager = BackupManager(application, db)
     private var pendingImportUri: Uri? = null
+    private var pendingParsedBill: BillImporter.ParsedBill? = null
     private var latestRefresh = 0
 
     private val _uiState = MutableStateFlow(BillUiState())
@@ -61,6 +69,11 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         val ticket = ++latestRefresh
         viewModelScope.launch {
             val previousMessage = _uiState.value.message
+            val previousPreview = _uiState.value.importPreview
+            val previousReport = _uiState.value.lastImportResult
+            val previousAudit = _uiState.value.dataAudit
+            val previousTrendDetails = _uiState.value.trendDetails
+            val previousTrendLabel = _uiState.value.trendSelectionLabel
             _uiState.value = _uiState.value.copy(isLoading = true)
             val state = withContext(Dispatchers.IO) {
                 synchronized(db) {
@@ -77,6 +90,15 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     searchLimit = searchLimit,
                     searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit),
                     monthlyTransactions = monthly,
+                    creditCenter = db.creditCenter(month),
+                    creditHistory = db.creditHistory(),
+                    loanHistory = db.loanHistory(),
+                    loanProfiles = db.loanProfiles(),
+                    categoryRules = db.categoryRules(),
+                    trendDays = db.trend30(month,platform),
+                    trendMonths = db.trend12(month,platform),
+                    trendDetails = previousTrendDetails,
+                    trendSelectionLabel = previousTrendLabel,
                     loanDetails = db.loanDetails(),
                     productGroups = ProductAnalysis.groups(monthly, aliases, merchantAliases),
                     productAliases = aliases,
@@ -110,6 +132,9 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     dailyTotals = db.dailyTotals(month, platform),
                     recurringExpenses = db.recurringExpenses(month, platform),
                     totalStored = db.transactionCount(),
+                    importPreview = previousPreview,
+                    lastImportResult = previousReport,
+                    dataAudit = previousAudit,
                     isLoading = false,
                     message = previousMessage,
                 )
@@ -119,61 +144,103 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    /**
+     * Parsing is read-only. Wait for the user's confirmation before inserting any row.
+     * A ZIP password is needed only to parse the chosen archive.
+     */
     fun importBill(uri: Uri, zipPassword: String? = null) {
-        _uiState.value = _uiState.value.copy(isLoading = true, message = null, needsZipPassword = false)
+        if (_uiState.value.isLoading) {
+            _uiState.value = _uiState.value.copy(message="请先完成当前操作")
+            return
+        }
+        pendingParsedBill=null
+        _uiState.value = _uiState.value.copy(
+            isLoading=true,message=null,needsZipPassword=false,importPreview=null
+        )
         viewModelScope.launch {
-            val result = runCatching {
+            val outcome=runCatching {
                 withContext(Dispatchers.IO) {
-                    val parsed = importer.parse(uri, synchronized(db) { db.merchantRules() }, zipPassword)
-                    val (inserted, duplicated) = synchronized(db) { db.insertAll(parsed.transactions) }
-                    ImportResult(
-                        parsed = parsed.transactions.size,
-                        inserted = inserted,
-                        duplicated = duplicated,
-                        ignored = parsed.transactions.count { it.flowType.name == "IGNORE" },
-                        platform = parsed.platform,
-                        sourceName = parsed.sourceName,
-                        startAt = parsed.transactions.minOfOrNull { it.occurredAt },
-                        endAt = parsed.transactions.maxOfOrNull { it.occurredAt },
+                    val parsed=importer.parse(
+                        uri,synchronized(db) { db.merchantRules() },zipPassword
                     )
+                    val fingerprints=synchronized(db) {
+                        db.existingFingerprints(parsed.transactions.map { it.fingerprint })
+                    }
+                    parsed to ImportReview.preview(parsed,fingerprints)
                 }
             }
-            result.onSuccess { imported ->
-                pendingImportUri = null
-                val source = when (imported.platform) {
-                    Platform.WECHAT -> "微信账单"
-                    Platform.ALIPAY -> "支付宝账单"
-                    Platform.UNKNOWN -> "账单"
-                }
-                val range = if (imported.startAt != null && imported.endAt != null) {
-                    " · ${formatDate(imported.startAt)}～${formatDate(imported.endAt)}"
-                } else {
-                    ""
-                }
-                _uiState.value = _uiState.value.copy(
-                    message = "$source$range · 导入 ${imported.inserted} 笔 · 重复 ${imported.duplicated} 笔",
-                    isLoading = false,
-                    needsZipPassword = false,
+            outcome.onSuccess { (parsed,preview) ->
+                pendingImportUri=null
+                pendingParsedBill=parsed
+                _uiState.value=_uiState.value.copy(
+                    importPreview=preview,isLoading=false,needsZipPassword=false,
+                    message=null
                 )
-                refresh()
             }.onFailure { error ->
                 if (error is PasswordRequiredException) {
-                    pendingImportUri = uri
-                    _uiState.value = _uiState.value.copy(
-                        needsZipPassword = true,
-                        message = null,
-                        isLoading = false,
+                    pendingImportUri=uri
+                    _uiState.value=_uiState.value.copy(
+                        needsZipPassword=true,isLoading=false,message=null
                     )
                 } else {
-                    val retryPassword = zipPassword != null && pendingImportUri != null
-                    _uiState.value = _uiState.value.copy(
-                        message = error.message ?: "导入失败",
-                        isLoading = false,
-                        needsZipPassword = retryPassword,
+                    _uiState.value=_uiState.value.copy(
+                        isLoading=false,
+                        needsZipPassword=zipPassword!=null && pendingImportUri!=null,
+                        message=error.message?:"解析账单失败；未写入任何数据"
                     )
                 }
             }
         }
+    }
+
+    fun confirmImport() {
+        val parsed=pendingParsedBill ?: return
+        val preview=_uiState.value.importPreview ?: return
+        if (_uiState.value.isLoading || !preview.canCommit) {
+            _uiState.value=_uiState.value.copy(message="请先解决导入预览中的异常")
+            return
+        }
+        _uiState.value=_uiState.value.copy(isLoading=true)
+        viewModelScope.launch {
+            val outcome=runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) {
+                        val (inserted,duplicates)=db.insertAll(parsed.transactions)
+                        ImportResult(
+                            parsed=parsed.transactions.size,inserted=inserted,
+                            duplicated=duplicates,
+                            ignored=parsed.transactions.count { it.flowType==FlowType.IGNORE },
+                            platform=parsed.platform,sourceName=parsed.sourceName,
+                            startAt=preview.startAt,endAt=preview.endAt,
+                        )
+                    }
+                }
+            }
+            outcome.onSuccess { result ->
+                pendingParsedBill=null
+                _uiState.value=_uiState.value.copy(
+                    isLoading=false,importPreview=null,lastImportResult=result,
+                    message="导入完成：新增 "+result.inserted+" 笔，重复 "+
+                        result.duplicated+" 笔"
+                )
+                refresh()
+            }.onFailure { error ->
+                _uiState.value=_uiState.value.copy(
+                    isLoading=false,
+                    message=(error.message?:"保存账单失败") + "；可重新确认或取消"
+                )
+            }
+        }
+    }
+
+    fun cancelImportPreview() {
+        pendingParsedBill=null
+        pendingImportUri=null
+        _uiState.value=_uiState.value.copy(importPreview=null,needsZipPassword=false)
+    }
+
+    fun clearImportReport() {
+        _uiState.value=_uiState.value.copy(lastImportResult=null)
     }
 
     fun updateCategory(transaction: Transaction, category: String, rememberMerchant: Boolean = true) {
@@ -188,6 +255,138 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+
+    private fun financeChange(success: String, action: BillDatabase.() -> Unit) {
+        if (_uiState.value.isLoading) {
+            _uiState.value=_uiState.value.copy(message="请先完成当前操作")
+            return
+        }
+        viewModelScope.launch {
+            val outcome=runCatching {
+                withContext(Dispatchers.IO) { synchronized(db) { db.action() } }
+            }
+            _uiState.value=_uiState.value.copy(
+                message=if(outcome.isSuccess) success else
+                    outcome.exceptionOrNull()?.message?:"操作未保存"
+            )
+            if(outcome.isSuccess) refresh()
+        }
+    }
+
+    fun addManualCredit(name:String,amountCent:Long,occurredAt:Long,note:String) =
+        financeChange("手动信用卡还款已保存") {
+            addManualCreditRepayment(name,amountCent,occurredAt,note)
+        }
+
+    fun linkManualCredit(manualId:Long,sourceId:Long) =
+        financeChange("已关联原账单，该笔补录不再重复计入还款") {
+            linkManualCreditRepayment(manualId,sourceId)
+        }
+
+    fun unlinkManualCredit(manualId:Long) =
+        financeChange("已取消原账单关联，请核对是否重复") {
+            unlinkManualCreditRepayment(manualId)
+        }
+
+    fun deleteManualCredit(manualId:Long) =
+        financeChange("已删除补录还款，原始导入流水未更改") {
+            deleteManualCreditRepayment(manualId)
+        }
+
+    fun renameCreditCard(source:String,display:String) =
+        financeChange("信用卡显示名称已更新") {
+            renameCreditCard(source,display)
+        }
+
+    fun saveLoanProfile(institution:String,original:Long?,remaining:Long?) =
+        financeChange("贷款档案已保存；余额来自手动填写，不做自动推算") {
+            saveLoanProfile(institution,original,remaining)
+        }
+
+    fun deleteLoanProfile(institution:String) =
+        financeChange("贷款档案已删除，历史还款记录仍保留") {
+            deleteLoanProfile(institution)
+        }
+
+    fun selectTrendRange(startAt:Long,endAt:Long,label:String) {
+        if(startAt>=endAt) return
+        viewModelScope.launch {
+            val platform=_uiState.value.platformFilter
+            val result=runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.rangeTransactions(startAt,endAt,platform) }
+                }
+            }
+            _uiState.value=_uiState.value.copy(
+                trendDetails=result.getOrDefault(emptyList()),
+                trendSelectionLabel=if(result.isSuccess) label else null,
+                message=result.exceptionOrNull()?.message
+            )
+        }
+    }
+
+    fun clearTrendSelection() {
+        _uiState.value=_uiState.value.copy(
+            trendDetails=emptyList(),trendSelectionLabel=null
+        )
+    }
+
+    fun previewCategoryRule(merchant:String) {
+        if (merchant.isBlank()) {
+            _uiState.value=_uiState.value.copy(
+                rulePreviewMerchant=null,rulePreviewCount=0
+            )
+            return
+        }
+        viewModelScope.launch {
+            val outcome=runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.ruleAffectedCount(merchant) }
+                }
+            }
+            _uiState.value=_uiState.value.copy(
+                rulePreviewMerchant=if(outcome.isSuccess) merchant.trim() else null,
+                rulePreviewCount=outcome.getOrDefault(0),
+                message=outcome.exceptionOrNull()?.message
+            )
+        }
+    }
+
+    fun saveCategoryRule(merchant:String,category:String,applyExisting:Boolean) {
+        if (_uiState.value.isLoading) return
+        viewModelScope.launch {
+            val result=runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.saveCategoryRule(merchant,category,applyExisting) }
+                }
+            }
+            _uiState.value=_uiState.value.copy(
+                message=result.fold(
+                    onSuccess={ count ->
+                        "规则已保存"+if(applyExisting) "，更新 $count 笔未人工确认流水" else
+                            "，仅影响以后导入的账单"
+                    },
+                    onFailure={ it.message?:"规则保存失败" }
+                )
+            )
+            if(result.isSuccess) refresh()
+        }
+    }
+
+    fun deleteCategoryRule(merchant:String) =
+        financeChange("已删除自动分类规则；历史流水未更改") {
+            deleteCategoryRule(merchant)
+        }
+
+    fun deleteMerchantAlias(source:String) =
+        financeChange("商户别名已删除；原始流水未更改") {
+            deleteMerchantAlias(source)
+        }
+
+    fun deleteProductAlias(key:String) =
+        financeChange("商品别名已删除；原始流水未更改") {
+            deleteProductAlias(key)
+        }
 
     fun recheckCreditRepayments() {
         if (_uiState.value.isLoading) {
@@ -461,6 +660,19 @@ data class BillUiState(
     val previousSummary: DashboardSummary = DashboardSummary(),
     val transactions: List<Transaction> = emptyList(),
     val monthlyTransactions: List<Transaction> = emptyList(),
+    val creditCenter: CreditCenter = CreditCenter(),
+    val creditHistory: List<Transaction> = emptyList(),
+    val trendDays: List<TrendPoint> = emptyList(),
+    val trendMonths: List<TrendPoint> = emptyList(),
+    val trendDetails: List<Transaction> = emptyList(),
+    val trendSelectionLabel: String? = null,
+    val loanHistory: List<Transaction> = emptyList(),
+    val loanProfiles: List<LoanProfile> = emptyList(),
+    val categoryRules: List<MerchantRule> = emptyList(),
+    val rulePreviewMerchant: String? = null,
+    val rulePreviewCount: Int = 0,
+    val importPreview: ImportPreview? = null,
+    val lastImportResult: ImportResult? = null,
     val loanDetails: Map<Long, LoanRepaymentDetail> = emptyMap(),
     val productGroups: List<ProductGroup> = emptyList(),
     val productAliases: Map<String,String> = emptyMap(),

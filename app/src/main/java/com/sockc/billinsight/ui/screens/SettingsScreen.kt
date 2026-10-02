@@ -39,6 +39,10 @@ fun SettingsScreen(
     onRunAudit: () -> Unit,
     onOpenAnalysis: () -> Unit,
     onOpenPending: () -> Unit,
+    onOpenCredit: () -> Unit,
+    onOpenLoan: () -> Unit,
+    onOpenRules: () -> Unit,
+    onOpenTrends: () -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize(),
         verticalArrangement=Arrangement.spacedBy(5.dp)) {
@@ -61,9 +65,32 @@ fun SettingsScreen(
             }
         }
         item {
+            SettingsSection("财务管理中心","信用卡、贷款及实际净消费分开核算") {
+                SettingsAction(
+                    "信用卡管理","查看每张卡还款、补录银行扣款、关联去重",
+                    onOpenCredit
+                )
+                HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
+                SettingsAction(
+                    "贷款管理","按机构查看累计还款，登记原始贷款与剩余本金",
+                    onOpenLoan
+                )
+                HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
+                SettingsAction(
+                    "消费趋势","近 7 天、30 天和最近 12 个月，点击核对流水",
+                    onOpenTrends
+                )
+            }
+        }
+        item {
             SettingsSection("分类与规则","优化商户合并与待确认交易") {
                 SettingsAction(
-                    "分类与商户排行","查看商户别名、商品归并和收支明细",
+                    "分类规则管理","查看、编辑及撤销商户和商品别名",
+                    onOpenRules
+                )
+                HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
+                SettingsAction(
+                    "商户消费排行","按时间查看商户、商品与对应流水",
                     onOpenAnalysis
                 )
                 HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
@@ -145,7 +172,7 @@ fun SettingsScreen(
             }
         }
         item {
-            SettingsSection("关于 BillInsight","V0.1.8 · 本地优先") {
+            SettingsSection("关于 BillInsight","V0.1.9 · 本地优先") {
                 Text("支持自动识别贷款到账与还款，并可手动拆分本金、利息和手续费。",
                     style=MaterialTheme.typography.bodyMedium)
                 Text("根据系统设置自动切换深色/浅色主题。所有统计均可查看对应原始流水。",

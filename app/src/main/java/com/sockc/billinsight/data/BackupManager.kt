@@ -135,7 +135,7 @@ class BackupManager(
                 }
             }
             db.rawQuery("PRAGMA user_version", null).use { result ->
-                check(result.moveToFirst() && result.getInt(0) in 1..7) {
+                check(result.moveToFirst() && result.getInt(0) in 1..8) {
                     "不支持此备份的数据库版本"
                 }
             }

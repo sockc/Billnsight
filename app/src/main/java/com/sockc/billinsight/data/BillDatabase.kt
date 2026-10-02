@@ -9,6 +9,11 @@ import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.model.CreditCenter
+import com.sockc.billinsight.model.ManualCreditRepayment
+import com.sockc.billinsight.model.LoanProfile
+import com.sockc.billinsight.model.MerchantRule
+import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.importer.CreditRepaymentDetector
 import com.sockc.billinsight.model.LoanRepaymentDetail
 import com.sockc.billinsight.model.LoanRepaymentPolicy
@@ -20,6 +25,8 @@ import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.RecurringExpense
 import com.sockc.billinsight.model.Transaction
 import java.time.YearMonth
+import java.time.LocalDate
+import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.roundToLong
 
@@ -54,6 +61,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         db.execSQL("CREATE INDEX idx_transactions_platform ON transactions(platform)")
         createLinkAndAliasTables(db)
         createLoanDetailsTable(db)
+        createFinanceCenterTables(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -153,6 +161,44 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             // descriptions or original trade types are repaired automatically.
             backfillCreditRepayments(db, includeCounterparty = false)
         }
+        if (oldVersion < 8) {
+            createFinanceCenterTables(db)
+        }
+    }
+
+    private fun createFinanceCenterTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS manual_credit_repayments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_name TEXT NOT NULL,
+                amount_cent INTEGER NOT NULL CHECK(amount_cent > 0),
+                occurred_at INTEGER NOT NULL,
+                note TEXT NOT NULL DEFAULT '',
+                linked_transaction_id INTEGER UNIQUE REFERENCES transactions(id),
+                created_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_manual_credit_time ON manual_credit_repayments(occurred_at)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS credit_card_aliases (
+                source_key TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS loan_profiles (
+                institution TEXT PRIMARY KEY,
+                original_amount_cent INTEGER CHECK(original_amount_cent >= 0),
+                remaining_principal_cent INTEGER CHECK(remaining_principal_cent >= 0),
+                updated_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
     }
 
     private fun backfillCreditRepayments(
@@ -746,8 +792,12 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 loanUnallocatedCent = loan[0] - loan[2] - financeCost,
                 linkedRefundCent = linked.first,
                 linkedShareCent = linked.second,
-                creditRepaymentCent = c.getLong(12),
-                creditRepaymentCount = c.getInt(13),
+                creditRepaymentCent = c.getLong(12) +
+                    if (platform == null) creditManualPayments(month)
+                        .filter { it.countsAsRepayment }.sumOf { it.amountCent } else 0L,
+                creditRepaymentCount = c.getInt(13) +
+                    if (platform == null) creditManualPayments(month)
+                        .count { it.countsAsRepayment } else 0,
                 businessExpenseCent = c.getLong(14),
                 loanOutCent = c.getLong(15),
                 expenseCent = c.getLong(0) + financeCost,
@@ -1155,6 +1205,374 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             }
     }
 
+
+    fun existingFingerprints(fingerprints: Collection<String>): Set<String> {
+        if (fingerprints.isEmpty()) return emptySet()
+        return buildSet {
+            fingerprints.distinct().chunked(350).forEach { chunk ->
+                val marks = chunk.joinToString(",") { "?" }
+                readableDatabase.rawQuery(
+                    "SELECT fingerprint FROM transactions WHERE fingerprint IN (" + marks + ")",
+                    chunk.toTypedArray()
+                ).use { c ->
+                    while (c.moveToNext()) add(c.getString(0))
+                }
+            }
+        }
+    }
+
+    fun rangeTransactions(
+        start:Long,end:Long,platform:Platform?=null,limit:Int=3000
+    ):List<Transaction> {
+        require(start<end)
+        val filter="occurred_at>=? AND occurred_at<?" +
+            if(platform==null) "" else " AND platform=?"
+        val args=mutableListOf(start.toString(),end.toString())
+        platform?.let { args+=it.name }
+        readableDatabase.query(
+            "transactions",null,filter,args.toTypedArray(),null,null,
+            "occurred_at DESC, id DESC",limit.coerceIn(1,10000).toString()
+        ).use { c ->
+            return buildList { while(c.moveToNext()) add(c.toTransaction()) }
+        }
+    }
+
+    fun trend30(month:YearMonth,platform:Platform?=null):List<TrendPoint> {
+        val zone=ZoneId.systemDefault()
+        val endDay=if(month==YearMonth.now(zone)) LocalDate.now(zone)
+            else month.atEndOfMonth()
+        val first=endDay.minusDays(29)
+        val start=first.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end=endDay.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val args=mutableListOf(start.toString(),end.toString())
+        val platformSql=if(platform==null) "" else " AND t.platform=?"
+        platform?.let { args+=it.name }
+        val sums=mutableMapOf<LocalDate,Long>()
+        readableDatabase.rawQuery(
+            """
+            SELECT t.occurred_at,t.flow_type,t.amount_cent,
+              COALESCE((SELECT SUM(l.amount_cent) FROM transaction_links l
+                WHERE l.expense_id=t.id),0),
+              COALESCE(d.interest_cent+d.fee_cent,0)
+            FROM transactions t LEFT JOIN loan_repayment_details d
+              ON d.transaction_id=t.id
+            WHERE t.occurred_at>=? AND t.occurred_at<?$platformSql
+              AND t.flow_type IN ('EXPENSE','GIFT_EXPENSE','LOAN_REPAYMENT')
+            """.trimIndent(),args.toTypedArray()
+        ).use { c ->
+            while(c.moveToNext()) {
+                val date=Instant.ofEpochMilli(c.getLong(0)).atZone(zone).toLocalDate()
+                val amount=when(c.getString(1)) {
+                    "EXPENSE","GIFT_EXPENSE" -> c.getLong(2)-c.getLong(3)
+                    else -> c.getLong(4)
+                }
+                sums[date]=(sums[date]?:0L)+amount
+            }
+        }
+        return (0L..29L).map { delta ->
+            val day=first.plusDays(delta)
+            val from=day.atStartOfDay(zone).toInstant().toEpochMilli()
+            val until=day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            TrendPoint(
+                label=day.monthValue.toString()+"/"+day.dayOfMonth,
+                startAt=from,endAt=until,expenseCent=(sums[day]?:0L).coerceAtLeast(0)
+            )
+        }
+    }
+
+    fun trend12(month:YearMonth,platform:Platform?=null):List<TrendPoint> =
+        (11 downTo 0).map { back ->
+            val period=month.minusMonths(back.toLong())
+            val (start,end)=monthRange(period)
+            TrendPoint(
+                label=period.year.toString()+"-"+period.monthValue.toString().padStart(2,'0'),
+                startAt=start,endAt=end,
+                expenseCent=summary(period,platform).netExpenseCent
+            )
+        }
+
+    fun creditManualPayments(month: YearMonth? = null): List<ManualCreditRepayment> {
+        val where = if (month == null) null else "occurred_at>=? AND occurred_at<?"
+        val args = month?.let {
+            val (start,end) = monthRange(it)
+            arrayOf(start.toString(),end.toString())
+        }
+        readableDatabase.query(
+            "manual_credit_repayments",null,where,args,null,null,
+            "occurred_at DESC, id DESC"
+        ).use { c ->
+            return buildList {
+                while (c.moveToNext()) add(ManualCreditRepayment(
+                    id=c.getLong(c.getColumnIndexOrThrow("id")),
+                    cardName=c.getString(c.getColumnIndexOrThrow("card_name")),
+                    amountCent=c.getLong(c.getColumnIndexOrThrow("amount_cent")),
+                    occurredAt=c.getLong(c.getColumnIndexOrThrow("occurred_at")),
+                    note=c.getString(c.getColumnIndexOrThrow("note")),
+                    linkedTransactionId=c.getColumnIndexOrThrow("linked_transaction_id").let {
+                        if (c.isNull(it)) null else c.getLong(it)
+                    },
+                ))
+            }
+        }
+    }
+
+    fun creditCardAliases(): Map<String,String> {
+        readableDatabase.rawQuery("SELECT source_key,display_name FROM credit_card_aliases",null)
+            .use { c ->
+                return buildMap {
+                    while (c.moveToNext()) put(c.getString(0),c.getString(1))
+                }
+            }
+    }
+
+    fun renameCreditCard(source: String, displayName: String) {
+        val normalized = source.trim().lowercase()
+        val display = displayName.trim()
+        require(normalized.isNotBlank() && display.length in 1..80) { "请输入有效的信用卡名称" }
+        writableDatabase.insertWithOnConflict(
+            "credit_card_aliases",null,
+            ContentValues().apply {
+                put("source_key",normalized)
+                put("display_name",display)
+            },SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    fun creditHistory(limit:Int=3000):List<Transaction> {
+        readableDatabase.query(
+            "transactions",null,"flow_type='CREDIT_REPAYMENT'",null,null,null,
+            "occurred_at DESC",limit.coerceIn(1,10000).toString()
+        ).use { c ->
+            return buildList { while(c.moveToNext()) add(c.toTransaction()) }
+        }
+    }
+
+    fun loanHistory(limit:Int=3000):List<Transaction> {
+        readableDatabase.query(
+            "transactions",null,"flow_type IN ('LOAN_REPAYMENT','LOAN_DISBURSEMENT')",
+            null,null,null,"occurred_at DESC",limit.coerceIn(1,10000).toString()
+        ).use { c ->
+            return buildList { while(c.moveToNext()) add(c.toTransaction()) }
+        }
+    }
+
+    fun creditCenter(month: YearMonth): CreditCenter {
+        val (start,end) = monthRange(month)
+        val imported = mutableListOf<Transaction>()
+        val suspected = mutableListOf<Transaction>()
+        readableDatabase.query(
+            "transactions",null,
+            "occurred_at>=? AND occurred_at<? AND flow_type='CREDIT_REPAYMENT'",
+            arrayOf(start.toString(),end.toString()),null,null,
+            "occurred_at DESC","3000"
+        ).use { c -> while (c.moveToNext()) imported += c.toTransaction() }
+        // This list is advisory only; never mutate the ledger based on a fuzzy match.
+        readableDatabase.query(
+            "transactions",null,
+            "occurred_at>=? AND occurred_at<? AND nature_modified=0 AND " +
+                "flow_type IN ('TRANSFER','PENDING','LOAN_REPAYMENT','EXPENSE') AND " +
+                "(trade_type LIKE '%还款%' OR description LIKE '%还款%' OR " +
+                "counterparty LIKE '%信用卡%' OR counterparty LIKE '%贷记卡%')",
+            arrayOf(start.toString(),end.toString()),null,null,
+            "occurred_at DESC","100"
+        ).use { c ->
+            while (c.moveToNext()) {
+                val row=c.toTransaction()
+                if (row.flowType!=FlowType.EXPENSE || row.category=="其他") suspected+=row
+            }
+        }
+        return CreditCenter(imported,creditManualPayments(month),suspected,creditCardAliases())
+    }
+
+    fun addManualCreditRepayment(
+        name: String, amountCent: Long, occurredAt: Long, note: String
+    ): Long {
+        require(name.trim().length in 1..80 && amountCent > 0 && occurredAt > 0) {
+            "请输入有效的卡片名称、金额及还款日期"
+        }
+        val inserted=writableDatabase.insertOrThrow(
+            "manual_credit_repayments",null,
+            ContentValues().apply {
+                put("card_name",name.trim())
+                put("amount_cent",amountCent)
+                put("occurred_at",occurredAt)
+                put("note",note.take(300))
+                put("created_at",System.currentTimeMillis())
+            }
+        )
+        check(inserted>0)
+        return inserted
+    }
+
+    fun linkManualCreditRepayment(manualId: Long, transactionId: Long) {
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val manual=db.rawQuery(
+                "SELECT amount_cent,occurred_at,linked_transaction_id FROM manual_credit_repayments WHERE id=?",
+                arrayOf(manualId.toString())
+            ).use { c ->
+                require(c.moveToFirst() && c.isNull(2)) { "补录已关联或不存在" }
+                c.getLong(0) to c.getLong(1)
+            }
+            val source=db.rawQuery(
+                "SELECT amount_cent,occurred_at,flow_type FROM transactions WHERE id=?",
+                arrayOf(transactionId.toString())
+            ).use { c ->
+                require(c.moveToFirst() && c.getString(2)=="CREDIT_REPAYMENT") {
+                    "仅可关联已确认的信用卡还款"
+                }
+                c.getLong(0) to c.getLong(1)
+            }
+            require(manual.first==source.first) { "关联的还款金额必须完全一致" }
+            require(kotlin.math.abs(manual.second-source.second)<=90L*24*3600*1000) {
+                "关联的两笔还款日期相差超过 90 天"
+            }
+            val count=db.update(
+                "manual_credit_repayments",
+                ContentValues().apply { put("linked_transaction_id",transactionId) },
+                "id=? AND linked_transaction_id IS NULL",
+                arrayOf(manualId.toString())
+            )
+            check(count==1) { "该补录已被其他操作修改" }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun unlinkManualCreditRepayment(manualId: Long) {
+        writableDatabase.update(
+            "manual_credit_repayments",
+            ContentValues().apply { putNull("linked_transaction_id") },
+            "id=?",arrayOf(manualId.toString())
+        )
+    }
+
+    fun deleteManualCreditRepayment(manualId: Long) {
+        writableDatabase.delete("manual_credit_repayments","id=?",arrayOf(manualId.toString()))
+    }
+
+    fun loanProfiles(): List<LoanProfile> {
+        val registered=mutableMapOf<String,LoanProfile>()
+        readableDatabase.rawQuery(
+            "SELECT institution,original_amount_cent,remaining_principal_cent FROM loan_profiles",null
+        ).use { c ->
+            while (c.moveToNext()) registered[c.getString(0)]=LoanProfile(
+                institution=c.getString(0),
+                originalAmountCent=if (c.isNull(1)) null else c.getLong(1),
+                remainingPrincipalCent=if (c.isNull(2)) null else c.getLong(2),
+            )
+        }
+        readableDatabase.rawQuery(
+            """
+            SELECT COALESCE(NULLIF(TRIM(t.counterparty),''),'未知贷款机构'),
+                   COUNT(*),COALESCE(SUM(t.amount_cent),0),
+                   COALESCE(SUM(d.principal_cent),0),
+                   COALESCE(SUM(d.interest_cent),0),
+                   COALESCE(SUM(d.fee_cent),0),
+                   SUM(CASE WHEN d.transaction_id IS NULL THEN 1 ELSE 0 END)
+            FROM transactions t LEFT JOIN loan_repayment_details d
+              ON d.transaction_id=t.id
+            WHERE t.flow_type='LOAN_REPAYMENT'
+            GROUP BY 1
+            """.trimIndent(),null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val institution=c.getString(0)
+                val old=registered[institution]?:LoanProfile(institution)
+                registered[institution]=old.copy(
+                    transactionCount=c.getInt(1),repaidCent=c.getLong(2),
+                    principalCent=c.getLong(3),interestCent=c.getLong(4),
+                    feeCent=c.getLong(5),missingSplitCount=c.getInt(6)
+                )
+            }
+        }
+        return registered.values.sortedByDescending { it.repaidCent }
+    }
+
+    fun saveLoanProfile(institution: String, original: Long?, remaining: Long?) {
+        val key=institution.trim()
+        require(key.length in 1..100) { "请选择或输入贷款机构" }
+        require(original==null || original>0)
+        require(remaining==null || remaining>=0)
+        writableDatabase.insertWithOnConflict(
+            "loan_profiles",null,ContentValues().apply {
+                put("institution",key)
+                if (original==null) putNull("original_amount_cent") else put("original_amount_cent",original)
+                if (remaining==null) putNull("remaining_principal_cent") else put("remaining_principal_cent",remaining)
+                put("updated_at",System.currentTimeMillis())
+            },SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    fun deleteLoanProfile(institution: String) {
+        writableDatabase.delete("loan_profiles","institution=?",arrayOf(institution))
+    }
+
+    fun ruleAffectedCount(merchant:String):Int {
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM transactions WHERE counterparty=? " +
+                "AND flow_type='EXPENSE' AND nature_modified=0",
+            arrayOf(merchant.trim())
+        ).use { c -> c.moveToFirst(); return c.getInt(0) }
+    }
+
+    fun categoryRules(): List<MerchantRule> {
+        readableDatabase.rawQuery(
+            """
+            SELECT r.merchant,r.category,
+              (SELECT COUNT(*) FROM transactions t WHERE t.counterparty=r.merchant
+               AND t.flow_type='EXPENSE' AND t.nature_modified=0) affected
+            FROM merchant_rules r ORDER BY LOWER(r.merchant)
+            """.trimIndent(),null
+        ).use { c ->
+            return buildList {
+                while (c.moveToNext()) add(MerchantRule(
+                    c.getString(0),c.getString(1),c.getInt(2)
+                ))
+            }
+        }
+    }
+
+    fun saveCategoryRule(merchant: String, category: String, applyExisting: Boolean): Int {
+        val key=merchant.trim()
+        require(key.isNotBlank() && key.length<=120 && category.isNotBlank())
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            db.insertWithOnConflict(
+                "merchant_rules",null,ContentValues().apply {
+                    put("merchant",key)
+                    put("category",category)
+                    put("updated_at",System.currentTimeMillis())
+                },SQLiteDatabase.CONFLICT_REPLACE
+            )
+            val affected=if (applyExisting) db.update(
+                "transactions",ContentValues().apply { put("category",category) },
+                "counterparty=? AND flow_type='EXPENSE' AND nature_modified=0",
+                arrayOf(key)
+            ) else 0
+            db.setTransactionSuccessful()
+            return affected
+        } finally { db.endTransaction() }
+    }
+
+    fun deleteCategoryRule(merchant: String) {
+        writableDatabase.delete("merchant_rules","merchant=?",arrayOf(merchant))
+    }
+
+    fun deleteMerchantAlias(source: String) {
+        writableDatabase.delete("merchant_aliases","alias_key=?",arrayOf(source))
+    }
+
+    fun deleteProductAlias(key: String) {
+        val divider=key.indexOf('|')
+        require(divider>0)
+        writableDatabase.delete(
+            "product_aliases","merchant_key=? AND alias_key=?",
+            arrayOf(key.substring(0,divider),key.substring(divider+1))
+        )
+    }
+
     fun transactionCount(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM transactions", null).use { c ->
         c.moveToFirst(); c.getInt(0)
     }
@@ -1186,6 +1604,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 7
+        private const val DB_VERSION = 8
     }
 }
