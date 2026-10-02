@@ -1228,7 +1228,10 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
               COALESCE(SUM(CASE WHEN flow_type='BUSINESS_EXPENSE' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='LOAN_OUT' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='TRANSFER' AND category='资金提现'
-                THEN amount_cent ELSE 0 END), 0)
+                THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type IN ('EXPENSE','GIFT_EXPENSE')
+                    AND (payment_method LIKE '%信用卡%' OR payment_method LIKE '%贷记卡%')
+                THEN amount_cent ELSE 0 END),0)
             FROM transactions
             WHERE occurred_at >= ? AND occurred_at < ?$platformClause
         """.trimIndent()
@@ -1272,6 +1275,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 businessExpenseCent = c.getLong(14),
                 loanOutCent = c.getLong(15),
                 withdrawalCent = c.getLong(16),
+                creditFundedExpenseCent = c.getLong(17),
                 expenseCent = c.getLong(0) + financeCost,
                 incomeCent = c.getLong(1),
                 refundCent = c.getLong(2),
@@ -1298,7 +1302,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         fun args(vararg extra: String): Array<String> =
             (listOf(start.toString(), end.toString()) +
                 (platform?.let { listOf(it.name) } ?: emptyList()) + extra).toTypedArray()
-        val totals = LongArray(12)
+        val totals = LongArray(13)
         readableDatabase.rawQuery(
             """SELECT
                 COALESCE(SUM(CASE WHEN t.flow_type IN ('EXPENSE','GIFT_EXPENSE') THEN t.amount_cent ELSE 0 END),0),
@@ -1314,7 +1318,10 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 COALESCE(SUM(CASE WHEN t.flow_type='REFUND' THEN t.amount_cent ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN t.flow_type='TRANSFER' AND t.category='资金提现' THEN t.amount_cent ELSE 0 END),0),
                 COUNT(*),
-                COALESCE(SUM(CASE WHEN t.flow_type='PENDING' THEN 1 ELSE 0 END),0)
+                COALESCE(SUM(CASE WHEN t.flow_type='PENDING' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.flow_type IN ('EXPENSE','GIFT_EXPENSE')
+                    AND (t.payment_method LIKE '%信用卡%' OR t.payment_method LIKE '%贷记卡%')
+                THEN t.amount_cent ELSE 0 END),0)
                FROM transactions t WHERE t.occurred_at>=? AND t.occurred_at<?$clause""",
             args()
         ).use { c ->
@@ -1365,7 +1372,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             loanPrincipalCent=fees[0],
             loanInterestCent=fees[1],
             loanFeeCent=fees[2],
-            loanUnallocatedCent=(totals[4]-fees.sum()).coerceAtLeast(0)
+            loanUnallocatedCent=(totals[4]-fees.sum()).coerceAtLeast(0),
+            creditFundedExpenseCent=totals[12]
         )
     }
 
@@ -1379,6 +1387,49 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             buildList { while(c.moveToNext()) add(c.toTransaction()) }
         }
     }
+
+    /** All dates use [start,end); never approximate cross-year statistics from one month. */
+    fun rangeCategoryTotals(
+        start: Long, end: Long, platform: Platform? = null, limit: Int = 20
+    ): List<CategoryTotal> {
+        require(end>start)
+        val clause=if(platform==null) "" else " AND platform=?"
+        val args=mutableListOf(start.toString(),end.toString())
+        platform?.let { args+=it.name }
+        val results=readableDatabase.rawQuery(
+            """SELECT category,
+                SUM(amount_cent-COALESCE(
+                    (SELECT SUM(l.amount_cent) FROM transaction_links l
+                     WHERE l.expense_id=transactions.id),0)),
+                COUNT(*)
+               FROM transactions
+               WHERE occurred_at>=? AND occurred_at<?
+                 AND flow_type IN ('EXPENSE','GIFT_EXPENSE')$clause
+               GROUP BY category
+               HAVING SUM(amount_cent-COALESCE(
+                    (SELECT SUM(l.amount_cent) FROM transaction_links l
+                     WHERE l.expense_id=transactions.id),0)) > 0
+               ORDER BY 2 DESC LIMIT ?""",
+            (args+limit.toString()).toTypedArray()
+        ).use { c ->
+            buildList {
+                while(c.moveToNext()) add(CategoryTotal(c.getString(0),c.getLong(1),c.getInt(2)))
+            }
+        }
+        val feeClause=if(platform==null) "" else " AND t.platform=?"
+        val fees=readableDatabase.rawQuery(
+            """SELECT COALESCE(SUM(d.interest_cent+d.fee_cent),0),COUNT(*)
+               FROM transactions t JOIN loan_repayment_details d ON d.transaction_id=t.id
+               WHERE t.flow_type='LOAN_REPAYMENT' AND t.occurred_at>=?
+                 AND t.occurred_at<?$feeClause""",args.toTypedArray()
+        ).use { c -> c.moveToFirst(); c.getLong(0) to c.getInt(1) }
+        return (results+if(fees.first>0) listOf(
+            CategoryTotal("金融费用",fees.first,fees.second)) else emptyList())
+            .sortedByDescending { it.amountCent }.take(limit)
+    }
+
+    fun rangeManualCreditPayments(start: Long, end: Long): List<ManualCreditRepayment> =
+        creditManualPayments(null).filter { it.occurredAt>=start && it.occurredAt<end }
 
     fun categoryTotals(month: YearMonth, platform: Platform? = null, limit: Int = 20): List<CategoryTotal> {
         val (start, end) = monthRange(month)
