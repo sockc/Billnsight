@@ -185,6 +185,7 @@ fun SourceFilterRow(selected: Platform?, onSelect: (Platform?) -> Unit) {
     ) {
         listOf(null to "全部",Platform.WECHAT to "微信",Platform.ALIPAY to "支付宝",Platform.JD to "京东",Platform.DOUYIN to "抖音",Platform.MEITUAN to "美团",Platform.BANK to "银行卡")
             .forEach { (platform,label) ->
+                item {
                 FilterChip(
                     selected=selected==platform,
                     onClick={onSelect(platform)},
@@ -195,6 +196,7 @@ fun SourceFilterRow(selected: Platform?, onSelect: (Platform?) -> Unit) {
                         selectedLabelColor=MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 )
+                }
             }
     }
 }
