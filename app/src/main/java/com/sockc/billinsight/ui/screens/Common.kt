@@ -82,6 +82,9 @@ fun categoryColor(category: String): Color = when (category) {
     "经营相关" -> Color(0xFF28886B)
     "红包收入", "人情" -> Color(0xFFC8618A)
     "待确认" -> Color(0xFFD89E3C)
+    "转账支出" -> Color(0xFF657FC5)
+    "转账收入","扫码收入" -> Color(0xFF2D9B7E)
+    "资金提现" -> Color(0xFF8795A7)
     "金融费用", "贷款还款", "信用卡还款" -> Color(0xFFC28B36)
     "贷款到账", "收入" -> Color(0xFF2D9B7E)
     else -> Color(0xFF8795A7)
@@ -101,6 +104,8 @@ private fun categoryIcon(category: String): ImageVector = when (category) {
     "教育" -> Icons.Outlined.School
     "旅行" -> Icons.Outlined.FlightTakeoff
     "人情", "红包收入" -> Icons.Outlined.CardGiftcard
+    "转账支出","转账收入","资金提现" -> Icons.Outlined.SwapHoriz
+    "扫码收入" -> Icons.Outlined.AccountBalanceWallet
     "金融费用", "贷款还款", "信用卡还款" -> Icons.Outlined.AccountBalance
     "收入", "贷款到账" -> Icons.Outlined.AccountBalanceWallet
     "资金流转" -> Icons.Outlined.SwapHoriz

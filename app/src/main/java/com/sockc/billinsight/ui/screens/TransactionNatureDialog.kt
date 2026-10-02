@@ -99,7 +99,7 @@ fun TransactionNatureDialog(
                         FlowType.CREDIT_REPAYMENT -> "信用卡还款"
                         FlowType.LOAN_REPAYMENT -> "贷款还款"
                         FlowType.LOAN_DISBURSEMENT -> "贷款到账"
-                        FlowType.INCOME -> "收入"
+                        FlowType.INCOME -> if (transaction.category == "转账收入" || transaction.category == "扫码收入") transaction.category else "收入"
                         FlowType.REFUND -> "退款"
                         FlowType.IGNORE -> "忽略"
                         FlowType.PENDING -> "待确认"

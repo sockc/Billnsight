@@ -63,7 +63,11 @@ object TransactionClassifier {
             return Classification(FlowType.LOAN_REPAYMENT, "贷款还款")
         }
         // Known movements between accounts are not personal consumption.
-        if (listOf("充值", "提现", "余额宝", "零钱通", "资金转入", "资金转出")
+        // Withdrawals/recharges only move funds between accounts, not income or expense.
+        if (listOf("提现", "提现到银行卡", "转出到银行卡").any { kind.contains(it) }) {
+            return Classification(FlowType.TRANSFER, "资金提现")
+        }
+        if (listOf("充值", "余额宝", "零钱通", "资金转入", "资金转出")
                 .any { kind.contains(it) }) {
             return Classification(FlowType.TRANSFER, "资金流转")
         }
@@ -72,7 +76,7 @@ object TransactionClassifier {
         val qrReceipt = listOf("二维码收款", "收钱码", "面对面收款", "个人收款码", "扫码收款", "收款码收款")
             .any { kind.contains(it) }
         val qrPayment = ScanPaymentClassifier.isQrPayment(direction,type,description)
-        if (qrReceipt && incoming) return Classification(FlowType.INCOME, "收入")
+        if (qrReceipt && incoming) return Classification(FlowType.INCOME, "扫码收入")
         // Paying a friend's personal collection QR is normally a purchase too.
         // Transfer wording does not overrule explicit outgoing QR evidence.
         if (qrPayment && outgoing) {
@@ -83,8 +87,12 @@ object TransactionClassifier {
         if (qrReceipt || kind.contains("二维码付款") || kind.contains("扫码支付")) {
             return Classification(FlowType.PENDING, "待确认")
         }
-        if (kind.contains("转账")) {
-            return Classification(FlowType.PENDING, "待确认")
+        if (kind.contains("转账") || type.contains("转账")) {
+            return when {
+                incoming -> Classification(FlowType.INCOME, "转账收入")
+                outgoing -> Classification(FlowType.EXPENSE, "转账支出")
+                else -> Classification(FlowType.PENDING, "待确认")
+            }
         }
 
         val flow = when {

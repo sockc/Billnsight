@@ -83,7 +83,7 @@ fun TransactionsScreen(
     }
 
     LazyColumn(Modifier.fillMaxSize()) {
-        item { PageTitle("流水", "所有收入与支出可原地展开明细，支持全历史搜索及修改交易性质。") }
+        item { PageTitle("流水", "按日期看每一笔，搜索人名、商户或金额") }
         item { SourceFilterRow(platformFilter, onPlatformChange) }
         item {
             Row(
@@ -94,9 +94,9 @@ fun TransactionsScreen(
                     selected = !reviewMode, onClick = { onReviewModeChange(false) },
                     label = { Text("全部流水") },
                 )
-                FilterChip(
-                    selected = reviewMode, onClick = { onReviewModeChange(true) },
-                    label = { Text("待确认 $pendingCount") },
+                if(pendingCount>0) FilterChip(
+                    selected=reviewMode,onClick={onReviewModeChange(true)},
+                    label={Text("需核对 "+pendingCount+" 笔")},
                 )
             }
         }
@@ -123,7 +123,7 @@ fun TransactionsScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
-                    label = { Text("搜索商户、商品、分类、交易单号") },
+                    label = { Text("搜索人名、商户、金额或备注") },
                     placeholder = { Text("搜索全部历史流水") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),

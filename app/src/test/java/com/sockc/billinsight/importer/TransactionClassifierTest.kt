@@ -6,7 +6,7 @@ import org.junit.Test
 
 class TransactionClassifierTest {
     @Test
-    fun personToPersonTransferNeedsReview() {
+    fun personToPersonTransferIsExpense() {
         val result = TransactionClassifier.classify(
             direction = "支出",
             type = "转账",
@@ -15,7 +15,8 @@ class TransactionClassifierTest {
             status = "支付成功",
             merchantRules = emptyMap(),
         )
-        assertEquals(FlowType.PENDING, result.flowType)
+        assertEquals(FlowType.EXPENSE, result.flowType)
+        assertEquals("转账支出", result.category)
     }
 
     @Test
@@ -80,9 +81,10 @@ class TransactionClassifierTest {
         assertEquals(FlowType.EXPENSE, actual.flowType)
         assertEquals("餐饮", actual.category)
     }
-    @Test fun unspecifiedTransferStillNeedsReview() {
+    @Test fun personalIncomingTransferIsIncome() {
         val actual = TransactionClassifier.classify("收入", "转账", "张三", "给你的转账", "已收款", emptyMap())
-        assertEquals(FlowType.PENDING, actual.flowType)
+        assertEquals(FlowType.INCOME, actual.flowType)
+        assertEquals("转账收入", actual.category)
     }
 
     @Test fun qrReceiptWithoutDirectionNeedsReview() {
@@ -136,7 +138,8 @@ class TransactionClassifierTest {
         val actual = TransactionClassifier.classify(
             "支出","转账","张三","归还之前借的钱","成功",emptyMap()
         )
-        assertEquals(FlowType.PENDING,actual.flowType)
+        assertEquals(FlowType.EXPENSE,actual.flowType)
+        assertEquals("转账支出",actual.category)
     }
     @Test fun creditCardInstallmentIsNotMistakenForLoanRepayment() {
         val actual = TransactionClassifier.classify(
@@ -185,5 +188,30 @@ class TransactionClassifierTest {
         )
         assertEquals(FlowType.EXPENSE,actual.flowType)
         assertEquals("其他",actual.category)
+    }
+    @Test fun cashWithdrawalIsNotExpense() {
+        val result=TransactionClassifier.classify(
+            "支出","提现","银行卡","提现到银行卡","交易成功",emptyMap()
+        )
+        assertEquals(FlowType.TRANSFER,result.flowType)
+        assertEquals("资金提现",result.category)
+    }
+
+    @Test fun qrIncomeAndOrdinaryTransferAreSeparated() {
+        val qr=TransactionClassifier.classify(
+            "收入","二维码收款","朋友","收钱码","成功",emptyMap()
+        )
+        val transfer=TransactionClassifier.classify(
+            "收入","微信转账","朋友","转账","成功",emptyMap()
+        )
+        assertEquals("扫码收入",qr.category)
+        assertEquals("转账收入",transfer.category)
+    }
+
+    @Test fun actualCardRepaymentIsNotNormalTransferExpense() {
+        val result=TransactionClassifier.classify(
+            "支出","信用卡还款","招商银行","信用卡账单","成功",emptyMap()
+        )
+        assertEquals(FlowType.CREDIT_REPAYMENT,result.flowType)
     }
 }

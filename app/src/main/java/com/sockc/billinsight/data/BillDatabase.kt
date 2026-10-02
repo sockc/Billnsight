@@ -16,6 +16,7 @@ import com.sockc.billinsight.model.MerchantRule
 import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.importer.CreditRepaymentDetector
 import com.sockc.billinsight.importer.ScanPaymentClassifier
+import com.sockc.billinsight.importer.TransactionClassifier
 import com.sockc.billinsight.model.LoanRepaymentDetail
 import com.sockc.billinsight.model.LoanRepaymentPolicy
 import com.sockc.billinsight.analysis.MerchantAnalysis
@@ -177,6 +178,54 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             createScanTables(db)
             migrateOldQrPurchases(db)
         }
+        if (oldVersion < 10) {
+            migrateAutoTransfers(db)
+        }
+    }
+
+    /**
+     * Only untouched default classifications are eligible. Do not rewrite
+     * historic manually reviewed items or account transfers such as withdrawals.
+     */
+    private fun migrateAutoTransfers(db:SQLiteDatabase):Int {
+        val candidates=mutableListOf<Triple<Long,String,String>>()
+        db.rawQuery(
+            """
+            SELECT id,direction_text,trade_type,counterparty,description,
+                   payment_method,flow_type,category
+            FROM transactions
+            WHERE nature_modified=0 AND
+              ((flow_type='PENDING' AND category='待确认') OR
+               (flow_type='TRANSFER' AND category='资金流转') OR
+               (flow_type='EXPENSE' AND category='其他' AND trade_type LIKE '%转账%'))
+            """.trimIndent(),null
+        ).use { c ->
+            while(c.moveToNext()) {
+                val updated=TransactionClassifier.classify(
+                    direction=c.getString(1),type=c.getString(2),
+                    merchant=c.getString(3),description=c.getString(4),
+                    status="成功",merchantRules=emptyMap(),
+                    paymentMethod=c.getString(5),
+                )
+                val eligible=(
+                    updated.category=="转账收入" && updated.flowType==FlowType.INCOME ||
+                    updated.category=="转账支出" && updated.flowType==FlowType.EXPENSE ||
+                    updated.category=="扫码收入" && updated.flowType==FlowType.INCOME ||
+                    updated.category=="资金提现" && updated.flowType==FlowType.TRANSFER
+                )
+                if(eligible) candidates+=Triple(
+                    c.getLong(0),updated.flowType.name,updated.category
+                )
+            }
+        }
+        var updated=0
+        candidates.forEach { (id,flow,category) ->
+            updated+=db.update("transactions",ContentValues().apply {
+                put("flow_type",flow)
+                put("category",category)
+            },"id=? AND nature_modified=0",arrayOf(id.toString()))
+        }
+        return updated
     }
 
     private fun createScanTables(db: SQLiteDatabase) {
@@ -500,8 +549,14 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
         if (query.isNotBlank()) {
             val escaped = query.trim().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            where += "(counterparty LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR trade_type LIKE ? ESCAPE '\\' OR category LIKE ? ESCAPE '\\' OR transaction_id LIKE ? ESCAPE '\\' OR merchant_order_id LIKE ? ESCAPE '\\')"
+            val money=runCatching {
+                java.math.BigDecimal(query.trim()).movePointRight(2)
+                    .toBigIntegerExact().longValueExact()
+            }.getOrNull()
+            where += "(counterparty LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR trade_type LIKE ? ESCAPE '\\' OR category LIKE ? ESCAPE '\\' OR transaction_id LIKE ? ESCAPE '\\' OR merchant_order_id LIKE ? ESCAPE '\\'"+
+                if(money==null) ")" else " OR amount_cent=?)"
             repeat(6) { args += "%$escaped%" }
+            if(money!=null) args+=money.toString()
         }
         readableDatabase.query(
             "transactions", null, where.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
@@ -988,7 +1043,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         val sql = """
             SELECT
               COALESCE(SUM(CASE WHEN flow_type IN ('EXPENSE','GIFT_EXPENSE') THEN amount_cent ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN flow_type='INCOME'
+              COALESCE(SUM(CASE WHEN flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME')
                   AND NOT EXISTS(SELECT 1 FROM transaction_links l
                                  WHERE l.receipt_id=transactions.id)
                 THEN amount_cent ELSE 0 END), 0),
@@ -1005,7 +1060,9 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
               COALESCE(SUM(CASE WHEN flow_type='CREDIT_REPAYMENT' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='CREDIT_REPAYMENT' THEN 1 ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='BUSINESS_EXPENSE' THEN amount_cent ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN flow_type='LOAN_OUT' THEN amount_cent ELSE 0 END), 0)
+              COALESCE(SUM(CASE WHEN flow_type='LOAN_OUT' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='TRANSFER' AND category='资金提现'
+                THEN amount_cent ELSE 0 END), 0)
             FROM transactions
             WHERE occurred_at >= ? AND occurred_at < ?$platformClause
         """.trimIndent()
@@ -1048,6 +1105,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                         .count { it.countsAsRepayment } else 0,
                 businessExpenseCent = c.getLong(14),
                 loanOutCent = c.getLong(15),
+                withdrawalCent = c.getLong(16),
                 expenseCent = c.getLong(0) + financeCost,
                 incomeCent = c.getLong(1),
                 refundCent = c.getLong(2),
@@ -1876,6 +1934,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 9
+        private const val DB_VERSION = 10
     }
 }

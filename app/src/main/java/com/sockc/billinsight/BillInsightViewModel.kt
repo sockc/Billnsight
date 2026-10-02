@@ -181,11 +181,36 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             }
             outcome.onSuccess { (parsed,preview) ->
                 pendingImportUri=null
-                pendingParsedBill=parsed
-                _uiState.value=_uiState.value.copy(
-                    importPreview=preview,isLoading=false,needsZipPassword=false,
-                    message=null
-                )
+                if (!preview.canCommit) {
+                    // Only malformed or unsupported bills need intervention.
+                    pendingParsedBill=parsed
+                    _uiState.value=_uiState.value.copy(
+                        importPreview=preview,isLoading=false,needsZipPassword=false,
+                        message="账单来源或金额异常，请检查原文件；未写入任何记录"
+                    )
+                } else {
+                    val saved=runCatching {
+                        withContext(Dispatchers.IO) {
+                            synchronized(db) { db.insertAll(parsed.transactions) }
+                        }
+                    }
+                    saved.onSuccess { (inserted,duplicates) ->
+                        pendingParsedBill=null
+                        _uiState.value=_uiState.value.copy(
+                            importPreview=null,isLoading=false,needsZipPassword=false,
+                            lastImportResult=null,
+                            message="已自动识别并导入 "+inserted+" 笔，跳过重复 "+
+                                duplicates+" 笔"
+                        )
+                        refresh()
+                    }.onFailure { error ->
+                        pendingParsedBill=parsed
+                        _uiState.value=_uiState.value.copy(
+                            importPreview=preview,isLoading=false,
+                            message=(error.message?:"保存账单失败")+"；未丢弃解析结果"
+                        )
+                    }
+                }
             }.onFailure { error ->
                 if (error is PasswordRequiredException) {
                     pendingImportUri=uri

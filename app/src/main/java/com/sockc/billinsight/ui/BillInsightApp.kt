@@ -13,7 +13,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.BarChart
-import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -41,7 +40,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.time.LocalDate
 import com.sockc.billinsight.BillInsightViewModel
 import com.sockc.billinsight.ui.screens.AnalysisScreen
-import com.sockc.billinsight.ui.screens.DiscoverScreen
 import com.sockc.billinsight.ui.screens.HomeScreen
 import com.sockc.billinsight.ui.screens.SettingsScreen
 import com.sockc.billinsight.ui.screens.TransactionsScreen
@@ -68,7 +66,6 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
             Destination("首页", Icons.Outlined.Home),
             Destination("流水", Icons.Outlined.ReceiptLong),
             Destination("分析", Icons.Outlined.BarChart),
-            Destination("发现", Icons.Outlined.Explore),
             Destination("我的", Icons.Outlined.PersonOutline),
         )
     }
@@ -177,33 +174,6 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
         )
     }
 
-    state.lastImportResult?.let { report ->
-        AlertDialog(
-            onDismissRequest=viewModel::clearImportReport,
-            title={Text("账单导入报告")},
-            text={
-                androidx.compose.foundation.layout.Column {
-                    Text("来源："+report.platform.name+" · "+report.sourceName)
-                    Text("解析 "+report.parsed+" 笔，新增 "+report.inserted+
-                        " 笔，重复 "+report.duplicated+" 笔")
-                    Text("已忽略 "+report.ignored+" 笔")
-                    Text("识别的扫码消费："+report.qrExpenseCount+" 笔")
-                    Text("扫码商户待补名："+report.qrMerchantReviewCount+" 笔")
-                    Text("可在扫码消费管理中补名及记忆分类，或到流水页核对全部记录。")
-                }
-            },
-            confirmButton={
-                TextButton(onClick={
-                    viewModel.clearImportReport()
-                    detailPage="scan"
-                }){Text("查看扫码消费")}
-            },
-            dismissButton={
-                TextButton(onClick=viewModel::clearImportReport){Text("完成")}
-            },
-        )
-    }
-
     if (state.needsZipPassword) {
         AlertDialog(
             onDismissRequest = viewModel::cancelZipPassword,
@@ -223,7 +193,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                         zipPassword = ""
                     },
                     enabled = zipPassword.isNotBlank(),
-                ) { Text("解压并预览") }
+                ) { Text("解压并导入") }
             },
             dismissButton = {
                 TextButton(onClick = {
@@ -309,17 +279,12 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                 )
                 else -> when (selected) {
                 0 -> HomeScreen(
-                    state = state,
-                    onPrevious = viewModel::previousMonth,
-                    onNext = viewModel::nextMonth,
-                    onImport = openImport,
-                    onPlatformChange = viewModel::setPlatformFilter,
-                    onReviewPending = { reviewMode = true; selected = 1 },
-                    onOpenAnalysis = { selected = 2 },
-                    onRecheckCredit = viewModel::recheckCreditRepayments,
-                    onOpenCreditCenter={detailPage="credit"},
-                    onOpenLoanCenter={detailPage="loans"},
-                    onOpenScanCenter={detailPage="scan"},
+                    state=state,
+                    onPrevious=viewModel::previousMonth,
+                    onNext=viewModel::nextMonth,
+                    onImport=openImport,
+                    onPlatformChange=viewModel::setPlatformFilter,
+                    onOpenAnalysis={selected=2},
                 )
                 1 -> TransactionsScreen(
                     transactions = state.searchResults,
@@ -342,20 +307,10 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onBulkConfirm = viewModel::bulkConfirmPending,
                 )
                 2 -> AnalysisScreen(
-                    state = state,
-                    onPlatformChange = viewModel::setPlatformFilter,
-                    onProductAlias = viewModel::saveProductAlias,
-                    onMerchantAlias = viewModel::saveMerchantAlias,
-                    onMerchantPeriodChange = viewModel::setMerchantPeriod,
-                    onLinkRecovery = viewModel::linkRecovery,
-                    onDeleteLink = viewModel::unlinkRecovery,
-                    onSaveLoan = viewModel::saveLoanDetail,
-                    onClearLoan = viewModel::clearLoanDetail,
-                )
-                3 -> DiscoverScreen(
-                    state = state,
-                    onPlatformChange = viewModel::setPlatformFilter,
-                    onSmallThresholdChange = viewModel::setSmallThreshold,
+                    state=state,
+                    onPlatformChange=viewModel::setPlatformFilter,
+                    onPrevious=viewModel::previousMonth,
+                    onNext=viewModel::nextMonth,
                 )
                 else -> SettingsScreen(
                     state = state,

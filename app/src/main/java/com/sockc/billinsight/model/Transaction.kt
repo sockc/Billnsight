@@ -63,6 +63,7 @@ data class DashboardSummary(
     val incomeCent: Long = 0,
     val refundCent: Long = 0,
     val transferCent: Long = 0,
+    val withdrawalCent: Long = 0,
     val transactionCount: Int = 0,
     val smallExpenseCent: Long = 0,
     val smallExpenseCount: Int = 0,
