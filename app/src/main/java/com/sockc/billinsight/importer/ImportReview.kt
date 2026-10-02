@@ -23,6 +23,9 @@ object ImportReview {
             invalidAmountCount=parsed.transactions.count {
                 it.amountCent<=0L && it.flowType!=FlowType.IGNORE
             },
+            invalidTimeCount=parsed.transactions.count {
+                it.occurredAt<=0L && it.flowType!=FlowType.IGNORE
+            },
             startAt=parsed.transactions.minOfOrNull { it.occurredAt },
             endAt=parsed.transactions.maxOfOrNull { it.occurredAt }
         )

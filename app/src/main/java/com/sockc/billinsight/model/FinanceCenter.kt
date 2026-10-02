@@ -45,12 +45,13 @@ data class ImportPreview(
     val pendingCount: Int,
     val creditRepaymentCount: Int,
     val invalidAmountCount: Int,
+    val invalidTimeCount: Int,
     val startAt: Long?,
     val endAt: Long?,
 ) {
     val total: Int get() = transactions.size
     val canCommit: Boolean get() = total > 0 && platform != Platform.UNKNOWN &&
-        invalidAmountCount == 0
+        invalidAmountCount == 0 && invalidTimeCount == 0
     val samples: List<Transaction> get() = transactions.take(12)
 }
 

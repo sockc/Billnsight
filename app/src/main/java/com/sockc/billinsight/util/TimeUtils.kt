@@ -19,7 +19,11 @@ private val inputFormats = listOf(
     DateTimeFormatter.ofPattern("yyyy-M-d H:mm"),
 )
 
-fun parseDateTime(raw: String): Long {
+fun parseDateTime(raw: String): Long =
+    parseDateTimeOrNull(raw) ?: System.currentTimeMillis()
+
+/** Strict parsing for importing financial records; invalid dates must not become today. */
+fun parseDateTimeOrNull(raw: String): Long? {
     val text = raw.trim()
     for (formatter in inputFormats) {
         try {
@@ -37,7 +41,7 @@ fun parseDateTime(raw: String): Long {
             .toEpochMilli()
     }
 
-    return System.currentTimeMillis()
+    return null
 }
 
 fun excelSerialToDateTimeText(serial: Double, date1904: Boolean): String =

@@ -50,6 +50,9 @@ fun ImportPreviewDialog(
                 Text("已有或文件内重复："+preview.duplicateCount+" 笔")
                 Text("待人工确认："+preview.pendingCount+" 笔")
                 Text("已识别信用卡还款："+preview.creditRepaymentCount+" 笔")
+                Text("日期无法解析："+preview.invalidTimeCount+" 笔",
+                    color=if(preview.invalidTimeCount>0) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface)
                 Text("异常金额："+preview.invalidAmountCount+" 笔",
                     color=if(preview.invalidAmountCount>0)
                         MaterialTheme.colorScheme.error
@@ -58,6 +61,8 @@ fun ImportPreviewDialog(
                     Text(
                         if(preview.platform==com.sockc.billinsight.model.Platform.UNKNOWN)
                             "无法确定微信或支付宝账单来源，请重新选择正确文件。"
+                        else if(preview.invalidTimeCount>0)
+                            "部分交易日期无法解析。为避免把旧账错误计为今天，请核对源文件日期格式。"
                         else if(preview.invalidAmountCount>0)
                             "检测到未忽略的零金额或负金额记录。为避免污染统计，本次不允许直接导入，请修正源文件。"
                         else "当前文件没有有效交易。",

@@ -7,7 +7,7 @@ import android.provider.OpenableColumns
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
 import com.sockc.billinsight.util.parseAmountToCent
-import com.sockc.billinsight.util.parseDateTime
+import com.sockc.billinsight.util.parseDateTimeOrNull
 import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.exception.ZipException
 import java.nio.charset.Charset
@@ -155,7 +155,7 @@ class BillImporter(
             merchantRules = merchantRules,
             paymentMethod = payment,
         )
-        val occurredAt = parseDateTime(time)
+        val occurredAt = parseDateTimeOrNull(time) ?: 0L
         val fingerprint = fingerprint(
             platform.name,
             transactionId.ifBlank { merchantOrderId },

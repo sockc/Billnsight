@@ -31,4 +31,13 @@ class ImportReviewTest {
         assertFalse(p.canCommit)
         assertEquals(1,p.invalidAmountCount)
     }
+    @Test fun invalidDateBlocksImportInsteadOfTurningIntoToday() {
+        val invalid=row("bad-date").copy(occurredAt=0L)
+        val preview=ImportReview.preview(
+            BillImporter.ParsedBill("bad.csv",Platform.WECHAT,listOf(invalid)),
+            emptySet()
+        )
+        assertFalse(preview.canCommit)
+        assertEquals(1,preview.invalidTimeCount)
+    }
 }
