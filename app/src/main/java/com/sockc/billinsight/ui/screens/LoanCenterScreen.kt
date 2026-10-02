@@ -139,8 +139,7 @@ fun LoanCenterScreen(
                     addingProfile=true
                 }){Text("＋ 贷款档案")}
             }
-            PageTitle("贷款管理","按机构查看还款及自行登记剩余本金")
-            MonthHeader(month,onPrevious,onNext)
+            PageTitleWithMonth("贷款管理","按机构查看还款",month,onPrevious,onNext)
         }
         item {
             Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
