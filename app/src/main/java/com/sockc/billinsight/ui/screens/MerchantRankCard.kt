@@ -17,6 +17,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.analysis.MerchantGroup
+import com.sockc.billinsight.analysis.MerchantAnalysis
 import com.sockc.billinsight.analysis.ProductAnalysis
 import com.sockc.billinsight.util.toYuanText
 
@@ -42,11 +44,18 @@ fun MerchantRankCard(
     maxAmount: Long,
     aliases: Map<String,String> = emptyMap(),
     onSaveAlias: ((merchant: String, original: String, canonical: String) -> Unit)? = null,
+    onSaveMerchantAlias: ((original: String, canonical: String) -> Unit)? = null,
 ) {
     var expanded by remember(group.key) { mutableStateOf(false) }
     var openProduct by remember(group.key) { mutableStateOf<String?>(null) }
     var renameProduct by remember(group.key) { mutableStateOf<String?>(null) }
     var canonical by remember(group.key) { mutableStateOf("") }
+    val originalNames = remember(group.key, group.transactions.size) {
+        group.transactions.mapNotNull(MerchantAnalysis::merchantName).distinct()
+    }
+    var merchantDialog by remember(group.key) { mutableStateOf(false) }
+    var selectedMerchantName by remember(group.key) { mutableStateOf(originalNames.firstOrNull().orEmpty()) }
+    var mergedMerchantName by remember(group.key) { mutableStateOf(group.name) }
     val fraction = (group.amountCent.toFloat() / maxAmount.coerceAtLeast(1).toFloat()).coerceIn(0.025f,1f)
 
     renameProduct?.let { original ->
@@ -74,6 +83,48 @@ fun MerchantRankCard(
                 ) { Text("保存") }
             },
             dismissButton = { TextButton(onClick = { renameProduct = null }) { Text("取消") } }
+        )
+    }
+
+    if (merchantDialog) {
+        AlertDialog(
+            onDismissRequest = { merchantDialog = false },
+            title = { Text("合并商户名称") },
+            text = {
+                Column {
+                    Text("选择原商户名称，别名只影响排行及分析，不修改原始账单。",
+                        style = MaterialTheme.typography.bodySmall)
+                    originalNames.forEach { raw ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { selectedMerchantName = raw },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = selectedMerchantName == raw,
+                                onClick = { selectedMerchantName = raw }
+                            )
+                            Text(raw, maxLines = 2)
+                        }
+                    }
+                    OutlinedTextField(
+                        value = mergedMerchantName,
+                        onValueChange = { mergedMerchantName = it.take(80) },
+                        label = { Text("统一商户名称") },
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = selectedMerchantName.isNotBlank() && mergedMerchantName.isNotBlank() &&
+                        selectedMerchantName.trim().lowercase() != mergedMerchantName.trim().lowercase(),
+                    onClick = {
+                        onSaveMerchantAlias?.invoke(selectedMerchantName, mergedMerchantName)
+                        merchantDialog = false
+                    }
+                ) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { merchantDialog = false }) { Text("取消") } },
         )
     }
 
@@ -128,6 +179,13 @@ fun MerchantRankCard(
                 )
             }
             if (expanded) {
+                if (onSaveMerchantAlias != null && originalNames.isNotEmpty()) {
+                    TextButton(onClick = {
+                        selectedMerchantName = originalNames.first()
+                        mergedMerchantName = group.name
+                        merchantDialog = true
+                    }) { Text("合并商户名称") }
+                }
                 val products = ProductAnalysis.groups(group.transactions, aliases)
                 products.forEach { product ->
                     val key = product.product
@@ -155,7 +213,10 @@ fun MerchantRankCard(
                                     canonical = product.product
                                 }) { Text("合并商品名称") }
                             }
-                            product.transactions.forEach { TransactionCard(it) }
+                            DailyLedger.group(product.transactions).forEach { (day, records) ->
+                                DailyLedgerHeader(day, records)
+                                records.forEach { TransactionCard(it) }
+                            }
                         }
                     }
                 }

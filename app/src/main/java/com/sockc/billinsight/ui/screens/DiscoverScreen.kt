@@ -156,12 +156,12 @@ fun DiscoverScreen(
                 modifier = Modifier.padding(20.dp)
             )
         }
-        items(state.merchantGroups.take(10)) { item ->
-            val rank = state.merchantGroups.indexOfFirst { it.key == item.key } + 1
+        items(state.monthlyMerchantGroups.take(10)) { item ->
+            val rank = state.monthlyMerchantGroups.indexOfFirst { it.key == item.key } + 1
             MerchantRankCard(
                 rank = rank,
                 group = item,
-                maxAmount = state.merchantGroups.firstOrNull()?.amountCent ?: 1L,
+                maxAmount = state.monthlyMerchantGroups.firstOrNull()?.amountCent ?: 1L,
                 aliases = state.productAliases,
             )
         }

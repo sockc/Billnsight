@@ -137,7 +137,10 @@ fun HomeScreen(
             if (entries.isEmpty()) {
                 item { Text("本月暂无此类流水", modifier = Modifier.padding(20.dp)) }
             } else {
-                items(entries, key = { "summary_${it.id}" }) { TransactionCard(it) }
+                items(DailyLedger.group(entries), key = { "summary_day_${it.first}" }) { (day, dayRecords) ->
+                    DailyLedgerHeader(day, dayRecords)
+                    dayRecords.forEach { TransactionCard(it) }
+                }
             }
         }
         item {

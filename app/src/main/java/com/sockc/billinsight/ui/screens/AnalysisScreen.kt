@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,6 +36,8 @@ fun AnalysisScreen(
     state: BillUiState,
     onPlatformChange: (Platform?) -> Unit,
     onProductAlias: (String, String, String) -> Unit,
+    onMerchantAlias: (String, String) -> Unit,
+    onMerchantPeriodChange: (String) -> Unit,
     onLinkRecovery: (Long, Long, LinkKind, Long) -> Unit,
     onDeleteLink: (Long) -> Unit,
 ) {
@@ -76,10 +80,26 @@ fun AnalysisScreen(
         }
 
         item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf(
+                    "MONTH" to "本月",
+                    "THREE_MONTHS" to "近三个月",
+                    "ALL" to "全部历史",
+                ).forEach { (period,title) ->
+                    FilterChip(
+                        selected=state.merchantPeriod==period,
+                        onClick={ onMerchantPeriodChange(period) },
+                        label={ Text(title) },
+                    )
+                }
+            }
             Text("同一商户消费排行", style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp))
             Text(
-                "真实商户单独排行；转账备注、收款备注及未识别商户不混入。",
+                "仅统计实际消费；商户别名可手动合并。全部历史最多读取最近 1 万笔消费。",
                 modifier = Modifier.padding(horizontal = 20.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -91,7 +111,10 @@ fun AnalysisScreen(
         } else {
             items(state.merchantGroups.take(30), key = { "merchant_${it.key}" }) { group ->
                 val rank = state.merchantGroups.indexOfFirst { it.key == group.key } + 1
-                MerchantRankCard(rank, group, merchantMax, state.productAliases, onProductAlias)
+                MerchantRankCard(
+                    rank, group, merchantMax, state.productAliases,
+                    onProductAlias, onMerchantAlias
+                )
             }
         }
 
@@ -140,7 +163,12 @@ fun AnalysisScreen(
                                         modifier = Modifier.padding(start = 10.dp),
                                         fontWeight = FontWeight.SemiBold)
                                 }
-                                if (payerOpen) list.forEach { TransactionCard(it) }
+                                if (payerOpen) {
+                                    DailyLedger.group(list).forEach { (day, entries) ->
+                                        DailyLedgerHeader(day, entries)
+                                        entries.forEach { TransactionCard(it) }
+                                    }
+                                }
                             }
                         }
                     }
@@ -171,11 +199,15 @@ fun AnalysisScreen(
                         val categoryTransactions = state.monthlyTransactions.filter {
                             it.category == category.category
                         }
-                        val merchants = MerchantAnalysis.groups(categoryTransactions)
+                        val merchants = MerchantAnalysis.groups(
+                            categoryTransactions, state.merchantAliases
+                        )
                         val max = merchants.maxOfOrNull { it.amountCent } ?: 1L
                         merchants.forEachIndexed { index, merchant ->
-                            MerchantRankCard(index + 1, merchant, max, state.productAliases,
-                                onProductAlias)
+                            MerchantRankCard(
+                                index + 1, merchant, max, state.productAliases,
+                                onProductAlias, onMerchantAlias
+                            )
                         }
                         categoryTransactions.filter { it.flowType == FlowType.GIFT_EXPENSE }
                             .forEach { TransactionCard(it) }

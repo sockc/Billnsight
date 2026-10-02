@@ -40,4 +40,16 @@ class MerchantAnalysisTest {
         val tx = tx("苏铂超市（白云湖） · 苏铂超市（白云湖）")
         assertEquals("苏铂超市（白云湖）", MerchantAnalysis.merchantName(tx))
     }
+    @Test fun userMerchantAliasMergesDifferentSourcesWithoutChangingOriginalTransactions() {
+        val one = tx("瑞幸咖啡")
+        val two = tx("瑞幸咖啡广州分店")
+        val result = MerchantAnalysis.groups(
+            listOf(one, two),
+            mapOf("瑞幸咖啡广州分店" to "瑞幸咖啡")
+        )
+        assertEquals(1, result.size)
+        assertEquals(2, result.single().count)
+        assertEquals(4000L, result.single().amountCent)
+        assertEquals("瑞幸咖啡广州分店", two.counterparty)
+    }
 }

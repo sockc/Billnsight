@@ -218,11 +218,14 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     platformFilter = state.platformFilter,
                     onPlatformChange = viewModel::setPlatformFilter,
                     onNatureChange = viewModel::updateNature,
+                    onBulkConfirm = viewModel::bulkConfirmPending,
                 )
                 2 -> AnalysisScreen(
                     state = state,
                     onPlatformChange = viewModel::setPlatformFilter,
                     onProductAlias = viewModel::saveProductAlias,
+                    onMerchantAlias = viewModel::saveMerchantAlias,
+                    onMerchantPeriodChange = viewModel::setMerchantPeriod,
                     onLinkRecovery = viewModel::linkRecovery,
                     onDeleteLink = viewModel::unlinkRecovery,
                 )
@@ -236,6 +239,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onImport = openImport,
                     onExportBackup = startBackup,
                     onRestoreBackup = startRestore,
+                    onRunAudit = viewModel::runDataAudit,
                 )
             }
 

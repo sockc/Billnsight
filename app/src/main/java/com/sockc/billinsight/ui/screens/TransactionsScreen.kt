@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -34,6 +35,7 @@ fun TransactionsScreen(
     platformFilter: Platform?,
     onPlatformChange: (Platform?) -> Unit,
     onNatureChange: (Transaction, FlowType, String) -> Unit,
+    onBulkConfirm: (List<Long>, FlowType, String) -> Unit,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     searchFlowFilter: String,
@@ -42,6 +44,10 @@ fun TransactionsScreen(
     onLoadMore: () -> Unit,
 ) {
     var editing by remember { mutableStateOf<Transaction?>(null) }
+    var selectedIds by remember(reviewMode, platformFilter) {
+        mutableStateOf<Set<Long>>(emptySet())
+    }
+    var bulkDialog by remember { mutableStateOf(false) }
     editing?.let { tx ->
         TransactionNatureDialog(
             transaction = tx,
@@ -53,6 +59,19 @@ fun TransactionsScreen(
         )
     }
     val shown = if (reviewMode) pendingTransactions else transactions
+    val pendingIds = pendingTransactions.map { it.id }.toSet()
+    val checked = selectedIds.intersect(pendingIds)
+    if (bulkDialog && checked.isNotEmpty()) {
+        BulkReviewDialog(
+            selected = pendingTransactions.filter { it.id in checked },
+            onDismiss = { bulkDialog = false },
+            onConfirm = { ids, type, category ->
+                onBulkConfirm(ids,type,category)
+                selectedIds = emptySet()
+                bulkDialog = false
+            },
+        )
+    }
 
     LazyColumn(Modifier.fillMaxSize()) {
         item { PageTitle("流水", "所有收入与支出可原地展开明细，支持全历史搜索及修改交易性质。") }
@@ -70,6 +89,24 @@ fun TransactionsScreen(
                     selected = reviewMode, onClick = { onReviewModeChange(true) },
                     label = { Text("待确认 $pendingCount") },
                 )
+            }
+        }
+        if (reviewMode) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TextButton(onClick = {
+                        selectedIds = if (checked.isEmpty())
+                            pendingTransactions.take(100).map { it.id }.toSet()
+                            else emptySet()
+                    }) { Text(if (checked.isEmpty()) "选择前 100 笔" else "取消全选") }
+                    TextButton(
+                        enabled = checked.isNotEmpty(),
+                        onClick = { bulkDialog = true }
+                    ) { Text("批量确认 ${checked.size} 笔") }
+                }
             }
         }
         if (!reviewMode) {
@@ -108,10 +145,31 @@ fun TransactionsScreen(
                 )
             }
         }
-        items(shown, key = { it.id }) { tx ->
-            TransactionCard(tx) {
-                TextButton(onClick = { editing = tx }) {
-                    Text(if (tx.flowType == FlowType.PENDING) "确认用途" else "修改性质")
+        items(DailyLedger.group(shown), key = { "day_${it.first}" }) { (day, records) ->
+            DailyLedgerHeader(day, records)
+            records.forEach { tx ->
+                if (reviewMode) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = tx.id in checked,
+                            onCheckedChange = { isChecked ->
+                                selectedIds = if (isChecked && checked.size < 100)
+                                    checked + tx.id else checked - tx.id
+                            }
+                        )
+                        Text(
+                            if (tx.id in checked) "已选择" else "选择此笔",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+                TransactionCard(tx) {
+                    TextButton(onClick = { editing = tx }) {
+                        Text(if (tx.flowType == FlowType.PENDING) "确认用途" else "修改性质")
+                    }
                 }
             }
         }

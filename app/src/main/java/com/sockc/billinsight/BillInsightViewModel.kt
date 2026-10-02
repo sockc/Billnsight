@@ -9,6 +9,7 @@ import com.sockc.billinsight.analysis.MerchantAnalysis
 import com.sockc.billinsight.analysis.MerchantGroup
 import com.sockc.billinsight.data.BillDatabase
 import com.sockc.billinsight.data.BackupManager
+import com.sockc.billinsight.data.DataAuditReport
 import com.sockc.billinsight.importer.BillImporter
 import com.sockc.billinsight.importer.PasswordRequiredException
 import com.sockc.billinsight.model.CategoryTotal
@@ -54,6 +55,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         searchQuery: String = _uiState.value.searchQuery,
         searchFlowFilter: String = _uiState.value.searchFlowFilter,
         searchLimit: Int = _uiState.value.searchLimit,
+        merchantPeriod: String = _uiState.value.merchantPeriod,
     ) {
         val ticket = ++latestRefresh
         viewModelScope.launch {
@@ -64,15 +66,21 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 val categories = db.categoryTotals(month, platform)
                 val monthly = db.monthTransactions(month, platform)
                 val aliases = db.productAliases()
+                val merchantAliases = db.merchantAliases()
+                val history = if (merchantPeriod == "MONTH") monthly else
+                    db.merchantHistoryTransactions(month, platform, merchantPeriod)
                 BillUiState(
                     searchQuery = searchQuery,
                     searchFlowFilter = searchFlowFilter,
                     searchLimit = searchLimit,
                     searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit),
                     monthlyTransactions = monthly,
-                    productGroups = ProductAnalysis.groups(monthly, aliases),
+                    productGroups = ProductAnalysis.groups(monthly, aliases, merchantAliases),
                     productAliases = aliases,
-                    merchantGroups = MerchantAnalysis.groups(monthly),
+                    merchantAliases = merchantAliases,
+                    merchantPeriod = merchantPeriod,
+                    merchantGroups = MerchantAnalysis.groups(history, merchantAliases),
+                    monthlyMerchantGroups = MerchantAnalysis.groups(monthly, merchantAliases),
                     links = db.linksForMonth(month, platform),
                     linkedReceiptIds = db.linkedReceiptIds(),
                     linkableReceipts = db.searchTransactions("", null, "INCOME", 2000)
@@ -173,6 +181,69 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 message = "已改为 $category${if (rememberMerchant) "，并记住该商户" else ""}"
             )
             refresh()
+        }
+    }
+
+    fun setMerchantPeriod(period: String) {
+        if (period !in setOf("MONTH","THREE_MONTHS","ALL")) return
+        if (period == _uiState.value.merchantPeriod) return
+        refresh(merchantPeriod = period)
+    }
+
+    fun saveMerchantAlias(original: String, canonical: String) {
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.saveMerchantAlias(original, canonical) }
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                dataAudit = null,
+                message = if (outcome.isSuccess) "已合并商户排行，原始账单保留不变"
+                else outcome.exceptionOrNull()?.message ?: "合并商户失败"
+            )
+            if (outcome.isSuccess) refresh()
+        }
+    }
+
+    fun bulkConfirmPending(ids: List<Long>, nature: FlowType, category: String) {
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.bulkConfirmPending(ids, nature, category) }
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                dataAudit = null,
+                message = outcome.fold(
+                    onSuccess = { "已确认 $it 笔交易" },
+                    onFailure = { it.message ?: "批量确认失败，未修改任何记录" },
+                )
+            )
+            if (outcome.isSuccess) refresh()
+        }
+    }
+
+    fun runDataAudit() {
+        if (_uiState.value.isLoading) {
+            _uiState.value = _uiState.value.copy(message = "请等待当前操作完成")
+            return
+        }
+        viewModelScope.launch {
+            val month = _uiState.value.month
+            val platform = _uiState.value.platformFilter
+            _uiState.value = _uiState.value.copy(isLoading = true, message = null)
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.dataAudit(month, platform) }
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                dataAudit = outcome.getOrNull(),
+                auditTime = if (outcome.isSuccess) System.currentTimeMillis() else null,
+                message = outcome.exceptionOrNull()?.message,
+            )
         }
     }
 
@@ -323,7 +394,12 @@ data class BillUiState(
     val monthlyTransactions: List<Transaction> = emptyList(),
     val productGroups: List<ProductGroup> = emptyList(),
     val productAliases: Map<String,String> = emptyMap(),
+    val merchantAliases: Map<String,String> = emptyMap(),
+    val merchantPeriod: String = "MONTH",
     val merchantGroups: List<MerchantGroup> = emptyList(),
+    val monthlyMerchantGroups: List<MerchantGroup> = emptyList(),
+    val dataAudit: DataAuditReport? = null,
+    val auditTime: Long? = null,
     val links: List<ExpenseLink> = emptyList(),
     val linkedReceiptIds: Set<Long> = emptySet(),
     val linkableReceipts: List<Transaction> = emptyList(),

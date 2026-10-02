@@ -9,6 +9,7 @@ import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.analysis.MerchantAnalysis
 import com.sockc.billinsight.model.LinkKind
 import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
@@ -122,9 +123,25 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             )
             matchRefundsInTransaction(db)
         }
+        if (oldVersion < 5) {
+            createMerchantAliasesTable(db)
+        }
+    }
+
+    private fun createMerchantAliasesTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS merchant_aliases (
+                alias_key TEXT PRIMARY KEY,
+                canonical TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
     }
 
     private fun createLinkAndAliasTables(db: SQLiteDatabase) {
+        createMerchantAliasesTable(db)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS transaction_links (
@@ -396,6 +413,60 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         readableDatabase.rawQuery("SELECT receipt_id FROM transaction_links", null).use { c ->
             return buildSet {
                 while (c.moveToNext()) add(c.getLong(0))
+            }
+        }
+    }
+
+    fun merchantAliases(): Map<String, String> {
+        readableDatabase.rawQuery(
+            "SELECT alias_key,canonical FROM merchant_aliases", null
+        ).use { c ->
+            return buildMap {
+                while (c.moveToNext()) put(c.getString(0), c.getString(1))
+            }
+        }
+    }
+
+    fun saveMerchantAlias(original: String, canonical: String) {
+        val key = original.trim().lowercase()
+        val target = canonical.trim()
+        require(key.isNotBlank() && target.isNotBlank() && target.length <= 80) {
+            "商户名称不能为空且不能超过 80 个字符"
+        }
+        require(key != target.lowercase()) { "新的商户名称与原名称相同" }
+        writableDatabase.insertWithOnConflict(
+            "merchant_aliases", null,
+            ContentValues().apply {
+                put("alias_key", key)
+                put("canonical", target)
+                put("updated_at", System.currentTimeMillis())
+            }, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    /** Period applies only to merchant leaderboards, not monthly income/expense cards. */
+    fun merchantHistoryTransactions(
+        month: YearMonth, platform: Platform?, period: String
+    ): List<Transaction> {
+        require(period in setOf("MONTH","THREE_MONTHS","ALL"))
+        val filters = mutableListOf("flow_type='EXPENSE'")
+        val args = mutableListOf<String>()
+        if (period != "ALL") {
+            val (start, end) = monthRange(if (period == "MONTH") month else month.minusMonths(2))
+            filters += "occurred_at>=? AND occurred_at<?"
+            args += start.toString()
+            args += end.toString()
+        }
+        platform?.let {
+            filters += "platform=?"
+            args += it.name
+        }
+        readableDatabase.query(
+            "transactions", null, filters.joinToString(" AND "), args.toTypedArray(),
+            null, null, "occurred_at DESC", "10000"
+        ).use { cursor ->
+            return buildList {
+                while (cursor.moveToNext()) add(cursor.toTransaction())
             }
         }
     }
@@ -683,6 +754,97 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
      * Changing a transaction's nature never changes its fingerprint or reimports it.
      * Do not store a merchant-wide nature rule: one person can receive both loans and gifts.
      */
+    fun bulkConfirmPending(ids: List<Long>, flowType: FlowType, category: String): Int {
+        require(category.isNotBlank()) { "请选择分类" }
+        require(ids.size in 1..100 && ids.distinct().size == ids.size) {
+            "每次请选择 1～100 笔不同的待确认交易"
+        }
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val placeholders = ids.joinToString(",") { "?" }
+            val candidates = mutableListOf<ReviewCandidate>()
+            db.rawQuery(
+                "SELECT id,direction_text,flow_type FROM transactions WHERE id IN ($placeholders)",
+                ids.map { it.toString() }.toTypedArray()
+            ).use { c ->
+                while (c.moveToNext()) {
+                    candidates += ReviewCandidate(
+                        c.getLong(0), c.getString(1),
+                        FlowType.valueOf(c.getString(2))
+                    )
+                }
+            }
+            require(candidates.size == ids.size) { "有流水已被删除，请刷新后重试" }
+            BulkReviewPolicy.validate(candidates, flowType)
+            val values = ContentValues().apply {
+                put("flow_type", flowType.name)
+                put("category", category)
+            }
+            var updated = 0
+            ids.forEach { id ->
+                updated += db.update(
+                    "transactions", values, "id=? AND flow_type='PENDING'",
+                    arrayOf(id.toString())
+                )
+            }
+            require(updated == ids.size) { "部分流水状态已变化，请刷新后重试" }
+            db.setTransactionSuccessful()
+            return updated
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun dataAudit(month: YearMonth, platform: Platform?): DataAuditReport {
+        val db = readableDatabase
+        fun count(sql: String, args: Array<String>? = null): Int =
+            db.rawQuery(sql, args).use { it.moveToFirst(); it.getInt(0) }
+        val total = count("SELECT COUNT(*) FROM transactions")
+        val pending = count("SELECT COUNT(*) FROM transactions WHERE flow_type='PENDING'")
+        val unmatched = count(
+            """SELECT COUNT(*) FROM transactions r WHERE r.flow_type='REFUND'
+               AND NOT EXISTS(SELECT 1 FROM transaction_links l WHERE l.receipt_id=r.id)"""
+        )
+        val amounts = count("SELECT COUNT(*) FROM transactions WHERE amount_cent<=0")
+        val directions = count(
+            """SELECT COUNT(*) FROM transactions
+               WHERE (flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT')
+                      AND direction_text LIKE '%收入%')
+                  OR (flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY')
+                      AND direction_text LIKE '%支出%')"""
+        )
+        val repeated = count(
+            """SELECT COALESCE(SUM(num-1),0) FROM
+               (SELECT COUNT(*) num FROM transactions WHERE transaction_id<>''
+                GROUP BY platform,transaction_id HAVING COUNT(*)>1)"""
+        )
+        val broken = count(
+            """SELECT COUNT(*) FROM transaction_links l
+               LEFT JOIN transactions e ON e.id=l.expense_id
+               LEFT JOIN transactions r ON r.id=l.receipt_id
+               WHERE e.id IS NULL OR r.id IS NULL
+                   OR l.amount_cent>e.amount_cent OR l.amount_cent>r.amount_cent"""
+        ) + count(
+            """SELECT COUNT(*) FROM
+               (SELECT l.expense_id FROM transaction_links l
+                JOIN transactions e ON e.id=l.expense_id
+                GROUP BY l.expense_id HAVING SUM(l.amount_cent)>MAX(e.amount_cent))"""
+        )
+        val summary = summary(month, platform)
+        val categorySum = categoryTotals(month, platform, 10000).sumOf { it.amountCent }
+        val good = runCatching {
+            db.rawQuery("PRAGMA quick_check", null).use { it.moveToFirst() && it.getString(0)=="ok" }
+        }.getOrDefault(false)
+        return DataAuditReport(
+            totalTransactions=total, pendingTransactions=pending, unmatchedRefunds=unmatched,
+            nonPositiveAmounts=amounts, directionMismatches=directions,
+            duplicatePlatformOrderIds=repeated, brokenLinks=broken,
+            expenseDifferenceCent=summary.expenseCent-categorySum,
+            databaseIntegrityOk=good
+        )
+    }
+
     fun updateNature(id: Long, flowType: FlowType, category: String) {
         require(id > 0) { "无效流水" }
         require(category.isNotBlank()) { "请选择分类" }
@@ -775,6 +937,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 4
+        private const val DB_VERSION = 5
     }
 }

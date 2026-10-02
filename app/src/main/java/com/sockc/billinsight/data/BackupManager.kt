@@ -62,23 +62,25 @@ class BackupManager(
             val archive = File(work, "input.bia")
             context.contentResolver.openInputStream(uri)?.use { input ->
                 archive.outputStream().use { output ->
-                    val bytes = input.copyTo(output)
-                    require(bytes in 1..MAX_BACKUP_BYTES) { "备份文件过大或为空" }
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        total += n
+                        require(total <= BackupArchiveValidator.MAX_SQLITE_BYTES + 8L*1024*1024) {
+                            "备份文件超过安全上限"
+                        }
+                        output.write(buffer, 0, n)
+                    }
+                    require(total > 0L) { "备份文件为空" }
                 }
             } ?: error("无法读取备份文件")
 
-            val zip = ZipFile(archive, password.toCharArray())
-            require(zip.isEncrypted && zip.fileHeaders.size == 1 &&
-                zip.fileHeaders.single().fileName == DB_NAME &&
-                !zip.fileHeaders.single().isDirectory
-            ) { "请选择 BillInsight 导出的加密 .bia 备份" }
-            val extracted = File(work, "extracted").apply { mkdirs() }
-            try {
-                zip.extractAll(extracted.absolutePath)
-            } catch (error: Exception) {
-                throw IllegalArgumentException("解密失败，请核对备份密码或文件完整性", error)
-            }
-            val snapshot = File(extracted, DB_NAME)
+            val extracted = File(work, "extracted")
+            val snapshot = BackupArchiveValidator.extractEncrypted(
+                archive, password.toCharArray(), extracted
+            )
             require(snapshot.isFile && snapshot.length() <= MAX_BACKUP_BYTES) {
                 "备份内容无效"
             }
@@ -133,7 +135,7 @@ class BackupManager(
                 }
             }
             db.rawQuery("PRAGMA user_version", null).use { result ->
-                check(result.moveToFirst() && result.getInt(0) in 1..4) {
+                check(result.moveToFirst() && result.getInt(0) in 1..5) {
                     "不支持此备份的数据库版本"
                 }
             }

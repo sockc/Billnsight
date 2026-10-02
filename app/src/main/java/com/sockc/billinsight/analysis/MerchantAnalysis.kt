@@ -41,9 +41,12 @@ object MerchantAnalysis {
         }
     }
 
-    fun groups(transactions: List<Transaction>): List<MerchantGroup> {
+    fun groups(transactions: List<Transaction>, aliases: Map<String, String> = emptyMap()): List<MerchantGroup> {
         val mapped = transactions.mapNotNull { tx ->
-            merchantName(tx)?.let { name -> name.lowercase() to (name to tx) }
+            merchantName(tx)?.let { original ->
+                val merged = aliases[original.trim().lowercase()]?.trim()?.takeIf { it.isNotBlank() } ?: original
+                merged.lowercase() to (merged to tx)
+            }
         }
         return mapped.groupBy({ it.first }, { it.second })
             .map { (key, entries) ->
