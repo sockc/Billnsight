@@ -28,6 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.BillUiState
+import com.sockc.billinsight.model.FinancePlanKind
+import com.sockc.billinsight.model.FinanceReference
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
@@ -46,6 +48,8 @@ fun TransactionsScreen(
     onSelectPeriod: (String,LocalDate?,LocalDate?)->Unit,
     onChangeExpenseCategory: (Transaction,String,String)->Unit,
     onPreviewExpenseCategory: (Transaction)->Unit,
+    onCreateFinance:(Long,FinancePlanKind,String,String,Long?,Int?,Int?)->Unit,
+    onOpenFinance:()->Unit,
     transactions: List<Transaction>,
     pendingTransactions: List<Transaction>,
     pendingCount: Int,
@@ -68,6 +72,15 @@ fun TransactionsScreen(
     var editing by remember { mutableStateOf<Transaction?>(null) }
     var editingCategory by remember { mutableStateOf<Transaction?>(null) }
     var editingLoan by remember { mutableStateOf<Transaction?>(null) }
+    var financeSource by remember { mutableStateOf<Transaction?>(null) }
+    financeSource?.let { tx ->
+        FinanceInstallmentEditor(source=tx,onDismiss={financeSource=null},
+            onCreate={id,kind,person,title,total,terms,due->
+                onCreateFinance(id,kind,person,title,total,terms,due)
+                financeSource=null
+                onOpenFinance()
+            })
+    }
     editingLoan?.let { tx ->
         LoanSplitDialog(transaction=tx,existing=loanDetails[tx.id],
             onDismiss={editingLoan=null},onSave=onSaveLoan,onClear=onClearLoan)
@@ -236,6 +249,7 @@ fun TransactionsScreen(
                         onPreviewExpenseCategory(tx)
                     }) else null,
                     trailing={
+                    Column(Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth(),
                         horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick={editing=tx}) {
@@ -252,6 +266,22 @@ fun TransactionsScreen(
                                 Text(if(loanDetails.containsKey(tx.id)) "修改还款拆分" else "拆分本金/利息")
                             }
                         }
+                    }
+                    if(!reviewMode && tx.platform!=Platform.UNKNOWN &&
+                        tx.flowType in setOf(
+                            FlowType.EXPENSE,FlowType.CREDIT_REPAYMENT,FlowType.LOAN_REPAYMENT
+                        )) {
+                        val linked=state.financePlans.any { plan ->
+                            plan.links.any { it.transaction.id==tx.id }
+                        }
+                        TextButton(onClick={
+                            if(linked)onOpenFinance() else financeSource=tx
+                        }) {
+                            Text(if(linked)"已归入金融分期 · 查看" else
+                                if(FinanceReference.isInstallmentEvidence(tx))
+                                    "设为金融分期" else "从此账单创建分期")
+                        }
+                    }
                     }
                 })
             }
