@@ -81,8 +81,8 @@ fun FinanceInstallmentEditor(
     val valid=title.trim().isNotBlank() &&
         (kind!=FinancePlanKind.ADVANCE || beneficiary.trim().isNotBlank()) &&
         (total.isBlank() || (amount!=null && amount>0)) &&
-        (terms.isBlank() || terms.toIntOrNull() in 2..360) &&
-        (dueDay.isBlank() || dueDay.toIntOrNull() in 1..31)
+        (terms.isBlank() || terms.toIntOrNull()?.let {it in 2..360} == true) &&
+        (dueDay.isBlank() || dueDay.toIntOrNull()?.let {it in 1..31} == true)
     AlertDialog(
         onDismissRequest=onDismiss,shape=RoundedCornerShape(21.dp),
         title={Text(if(existing==null)"从原账单创建分期" else "编辑分期卡片")},
