@@ -198,6 +198,12 @@ class FinancePlanStore(private val helper: BillDatabase) {
         val db=helper.writableDatabase
         db.beginTransaction()
         try {
+            if(role==FinanceLinkRole.RECOVERY) require(db.rawQuery(
+                "SELECT 1 FROM transaction_links WHERE receipt_id=? LIMIT 1",
+                arrayOf(tx.id.toString())
+            ).use {!it.moveToFirst()}) {
+                "这笔收入已关联消费退款或 AA 收款，请选择其他收款记录"
+            }
             addLink(db,planId,tx,role,false)
             db.setTransactionSuccessful()
         } finally {db.endTransaction()}
@@ -340,6 +346,13 @@ class FinancePlanStore(private val helper: BillDatabase) {
         }.sortedWith(compareByDescending<FinanceLinkSuggestion>{it.exactReference}
             .thenByDescending{it.transaction.occurredAt}).take(180)
     }
+
+    fun entrustedOriginIds(): Set<Long> =
+        helper.readableDatabase.rawQuery(
+            """SELECT p.origin_transaction_id FROM finance_installment_plans p
+               JOIN transactions t ON t.id=p.origin_transaction_id
+               WHERE p.kind='ADVANCE' AND t.flow_type='EXPENSE'""",null
+        ).use {c->buildSet {while(c.moveToNext()) add(c.getLong(0))}}
 
     /** Borrower repaid funds are linked to existing income, not inserted again. */
     fun recoveryReceiptIds(): Set<Long> =
