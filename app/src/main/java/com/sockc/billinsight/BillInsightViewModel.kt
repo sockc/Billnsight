@@ -174,7 +174,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     merchantGroups = MerchantAnalysis.groups(history, merchantAliases, scanLabels),
                     monthlyMerchantGroups = MerchantAnalysis.groups(monthly, merchantAliases, scanLabels),
                     links = db.linksForMonth(month, platform),
-                    linkedReceiptIds = db.linkedReceiptIds(),
+                    linkedReceiptIds = db.linkedReceiptIds() + financeStore.recoveryReceiptIds(),
+                    entrustedOriginIds=financeStore.entrustedOriginIds(),
                     linkableReceipts = db.searchTransactions("", null, "INCOME", 2000)
                         .filter { it.flowType in setOf(FlowType.INCOME, FlowType.REFUND) },
                     month = month,
@@ -1034,6 +1035,7 @@ data class BillUiState(
     val auditTime: Long? = null,
     val links: List<ExpenseLink> = emptyList(),
     val linkedReceiptIds: Set<Long> = emptySet(),
+    val entrustedOriginIds:Set<Long> = emptySet(),
     val linkableReceipts: List<Transaction> = emptyList(),
     val searchQuery: String = "",
     val searchFlowFilter: String = "ALL",
