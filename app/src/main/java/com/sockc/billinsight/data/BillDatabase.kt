@@ -72,6 +72,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         createFinanceCenterTables(db)
         createScanTables(db)
         createMerchantNatureRulesTable(db)
+        createPlatformCategoryRulesTable(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -187,6 +188,95 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
         if (oldVersion < 11) {
             createMerchantNatureRulesTable(db)
+        }
+        if (oldVersion < 12) createPlatformCategoryRulesTable(db)
+    }
+
+    private fun createPlatformCategoryRulesTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS platform_category_rules (
+                platform TEXT NOT NULL,
+                merchant TEXT NOT NULL,
+                category TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(platform, merchant)
+            )""".trimIndent()
+        )
+    }
+
+    /** Exact merchant and source only. Generic QR payees never create rules. */
+    fun changeExpenseCategory(id: Long, category: String, scope: String): Int {
+        require(scope in setOf("SINGLE", "MERCHANT", "FUTURE"))
+        require(category in TransactionClassifier.categories)
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val tx=db.query("transactions",null,"id=?",arrayOf(id.toString()),null,null,null)
+                .use { c -> if(c.moveToFirst()) c.toTransaction() else null }
+                ?: error("找不到这笔交易")
+            require(tx.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) {
+                "仅消费类交易可以修改商户消费分类"
+            }
+            val merchant=tx.counterparty.trim()
+            val batch=merchant.isNotEmpty() &&
+                !ScanPaymentClassifier.isGenericCounterparty(merchant) &&
+                tx.platform!=Platform.UNKNOWN && tx.flowType==FlowType.EXPENSE &&
+                tx.sourceFile!="手动记账"
+            require(scope=="SINGLE" || batch) {
+                "此交易没有明确的商家名称，请仅修改当前这一笔"
+            }
+            var affected=0
+            if(scope!="FUTURE") {
+                affected+=db.update("transactions",ContentValues().apply {
+                    put("category",category)
+                    put("nature_modified",1)
+                },"id=?",arrayOf(id.toString()))
+            }
+            if(scope!="SINGLE") {
+                db.insertWithOnConflict("platform_category_rules",null,ContentValues().apply {
+                    put("platform",tx.platform.name)
+                    put("merchant",merchant)
+                    put("category",category)
+                    put("updated_at",System.currentTimeMillis())
+                },SQLiteDatabase.CONFLICT_REPLACE)
+                if(scope=="MERCHANT") {
+                    affected+=db.update("transactions",ContentValues().apply {
+                        put("category",category)
+                    },"platform=? AND counterparty=? AND flow_type='EXPENSE' AND nature_modified=0",
+                        arrayOf(tx.platform.name,merchant))
+                }
+            }
+            db.setTransactionSuccessful()
+            return affected
+        } finally { db.endTransaction() }
+    }
+
+    fun platformCategoryRuleCount(tx: Transaction): Int {
+        if (tx.counterparty.isBlank()) return 0
+        return readableDatabase.rawQuery(
+            """SELECT COUNT(*) FROM transactions
+               WHERE platform=? AND counterparty=? AND flow_type='EXPENSE'
+                 AND nature_modified=0 AND id!=?""",
+            arrayOf(tx.platform.name,tx.counterparty.trim(),tx.id.toString())
+        ).use { c -> c.moveToFirst(); c.getInt(0) }
+    }
+
+    fun applyPlatformCategoryRules(items: List<Transaction>): List<Transaction> {
+        val rules=mutableMapOf<Pair<Platform,String>,String>()
+        readableDatabase.rawQuery("SELECT platform,merchant,category FROM platform_category_rules",null)
+            .use { c ->
+                while(c.moveToNext()) {
+                    val platform=runCatching { Platform.valueOf(c.getString(0)) }.getOrNull()
+                    if(platform!=null) rules[platform to c.getString(1)]=c.getString(2)
+                }
+            }
+        if(rules.isEmpty()) return items
+        return items.map { tx ->
+            val category=rules[tx.platform to tx.counterparty.trim()]
+            if(tx.flowType==FlowType.EXPENSE && category!=null &&
+                tx.sourceFile!="手动记账" &&
+                !ScanPaymentClassifier.isGenericCounterparty(tx.counterparty))
+                tx.copy(category=category) else tx
         }
     }
 
@@ -598,6 +688,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         platform: Platform? = null,
         flowFilter: String = "ALL",
         limit: Int = 200,
+        start: Long? = null,
+        end: Long? = null,
     ): List<Transaction> {
         val where = mutableListOf<String>()
         val args = mutableListOf<String>()
@@ -605,8 +697,19 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             where += "platform=?"
             args += it.name
         }
+        if(start!=null && end!=null) {
+            require(end>start)
+            where+="occurred_at>=? AND occurred_at<?"
+            args+=start.toString()
+            args+=end.toString()
+        }
         when (flowFilter) {
             "EXPENSE" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT','LOAN_REPAYMENT')"
+            "CONSUMPTION" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE')"
+            "REPAYMENT" -> where += "flow_type IN ('CREDIT_REPAYMENT','LOAN_REPAYMENT')"
+            "OUTFLOW" -> where += """(flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT','LOAN_REPAYMENT') AND
+                (flow_type NOT IN ('EXPENSE','GIFT_EXPENSE') OR
+                (payment_method NOT LIKE '%信用卡%' AND payment_method NOT LIKE '%贷记卡%')))"""
             "INCOME" -> where += "flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY','LOAN_DISBURSEMENT','REFUND')"
             "OTHER" -> where += "flow_type IN ('TRANSFER','PENDING','IGNORE')"
         }
@@ -2193,6 +2296,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 11
+        private const val DB_VERSION = 12
     }
 }
