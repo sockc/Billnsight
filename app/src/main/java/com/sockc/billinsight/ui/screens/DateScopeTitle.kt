@@ -38,6 +38,7 @@ fun DateScopeTitle(
         "LAST_7" -> "近7天"
         "YEAR" -> "今年"
         "LAST_YEAR" -> "去年"
+        "ALL_HISTORY" -> "全部历史"
         else -> state.homeStart.format(DateTimeFormatter.ofPattern("yy/MM/dd")) + "—" +
             state.homeEnd.format(DateTimeFormatter.ofPattern("yy/MM/dd"))
     }
