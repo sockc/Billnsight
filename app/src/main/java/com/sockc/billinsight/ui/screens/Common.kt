@@ -116,6 +116,10 @@ private fun categoryIcon(category: String): ImageVector = when (category) {
 fun platformLabel(platform: Platform?): String = when (platform) {
     Platform.WECHAT -> "微信"
     Platform.ALIPAY -> "支付宝"
+    Platform.JD -> "京东"
+    Platform.DOUYIN -> "抖音"
+    Platform.MEITUAN -> "美团"
+    Platform.BANK -> "银行卡"
     Platform.UNKNOWN -> "未知来源"
     null -> "全部"
 }
@@ -177,7 +181,7 @@ fun SourceFilterRow(selected: Platform?, onSelect: (Platform?) -> Unit) {
         Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
         horizontalArrangement=Arrangement.spacedBy(8.dp)
     ) {
-        listOf(null to "全部",Platform.WECHAT to "微信",Platform.ALIPAY to "支付宝")
+        listOf(null to "全部",Platform.WECHAT to "微信",Platform.ALIPAY to "支付宝",Platform.JD to "京东",Platform.DOUYIN to "抖音",Platform.MEITUAN to "美团",Platform.BANK to "银行卡")
             .forEach { (platform,label) ->
                 FilterChip(
                     selected=selected==platform,
@@ -212,6 +216,10 @@ fun PlatformBadge(platform: Platform) {
     val color=when(platform) {
         Platform.WECHAT -> Color(0xFF19A868)
         Platform.ALIPAY -> Color(0xFF367CE4)
+        Platform.JD -> Color(0xFFE84E49)
+        Platform.DOUYIN -> Color(0xFF202A3B)
+        Platform.MEITUAN -> Color(0xFFFFBA20)
+        Platform.BANK -> Color(0xFF735DD7)
         Platform.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Surface(color=color.copy(alpha=0.10f),contentColor=color,
