@@ -220,7 +220,7 @@ fun AnalysisScreen(
                             it.category == category.category
                         }
                         val merchants = MerchantAnalysis.groups(
-                            categoryTransactions, state.merchantAliases
+                            categoryTransactions, state.merchantAliases, state.scanMerchantLabels
                         )
                         val max = merchants.maxOfOrNull { it.amountCent } ?: 1L
                         merchants.forEachIndexed { index, merchant ->

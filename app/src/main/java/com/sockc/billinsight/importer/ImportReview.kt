@@ -3,6 +3,7 @@ package com.sockc.billinsight.importer
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.ImportPreview
 import com.sockc.billinsight.model.Transaction
+import com.sockc.billinsight.importer.ScanPaymentClassifier
 
 /** Pure, testable preview. Nothing is persisted until the user confirms. */
 object ImportReview {
@@ -22,6 +23,10 @@ object ImportReview {
             },
             invalidAmountCount=parsed.transactions.count {
                 it.amountCent<=0L && it.flowType!=FlowType.IGNORE
+            },
+            qrExpenseCount=parsed.transactions.count(ScanPaymentClassifier::isQrExpense),
+            qrMerchantReviewCount=parsed.transactions.count {
+                ScanPaymentClassifier.needsMerchantReview(it)
             },
             invalidTimeCount=parsed.transactions.count {
                 it.occurredAt<=0L && it.flowType!=FlowType.IGNORE

@@ -15,6 +15,7 @@ import com.sockc.billinsight.model.LoanProfile
 import com.sockc.billinsight.model.MerchantRule
 import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.importer.CreditRepaymentDetector
+import com.sockc.billinsight.importer.ScanPaymentClassifier
 import com.sockc.billinsight.model.LoanRepaymentDetail
 import com.sockc.billinsight.model.LoanRepaymentPolicy
 import com.sockc.billinsight.analysis.MerchantAnalysis
@@ -65,6 +66,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         createLinkAndAliasTables(db)
         createLoanDetailsTable(db)
         createFinanceCenterTables(db)
+        createScanTables(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -171,6 +173,62 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     "ON transactions(counterparty,flow_type,nature_modified)"
             )
         }
+        if (oldVersion < 9) {
+            createScanTables(db)
+            migrateOldQrPurchases(db)
+        }
+    }
+
+    private fun createScanTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS scan_merchant_labels (
+                transaction_id INTEGER PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS manual_scan_links (
+                manual_id INTEGER PRIMARY KEY,
+                imported_id INTEGER NOT NULL UNIQUE,
+                original_category TEXT NOT NULL,
+                linked_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+
+    /** Upgrade only clear outgoing QR evidence still using untouched default classifications. */
+    private fun migrateOldQrPurchases(db: SQLiteDatabase): Int {
+        val ids=mutableListOf<Long>()
+        db.rawQuery(
+            """
+            SELECT id,direction_text,trade_type,description,flow_type,category
+            FROM transactions
+            WHERE nature_modified=0 AND
+              ((flow_type='PENDING' AND category='待确认') OR
+               (flow_type='TRANSFER' AND category='资金流转'))
+            """.trimIndent(),null
+        ).use { c ->
+            while(c.moveToNext()) {
+                if(ScanPaymentClassifier.isQrPayment(
+                        c.getString(1),c.getString(2),c.getString(3)
+                    )) ids+=c.getLong(0)
+            }
+        }
+        val values=ContentValues().apply {
+            put("flow_type",FlowType.EXPENSE.name)
+            put("category","其他")
+        }
+        var count=0
+        ids.forEach { id ->
+            count+=db.update("transactions",values,
+                "id=? AND nature_modified=0",arrayOf(id.toString()))
+        }
+        return count
     }
 
     private fun createFinanceCenterTables(db: SQLiteDatabase) {
@@ -573,6 +631,177 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 while (c.moveToNext()) add(c.getLong(0))
             }
         }
+    }
+
+    fun scanMerchantLabels():Map<Long,String> {
+        readableDatabase.rawQuery(
+            "SELECT transaction_id,display_name FROM scan_merchant_labels",null
+        ).use { c ->
+            return buildMap {
+                while(c.moveToNext()) put(c.getLong(0),c.getString(1))
+            }
+        }
+    }
+
+    fun saveScanMerchantLabel(id:Long,name:String) {
+        val label=name.trim()
+        require(id>0 && label.length in 1..80 &&
+            !ScanPaymentClassifier.isGenericCounterparty(label)) {
+            "请输入明确的商户或收款方名称"
+        }
+        writableDatabase.rawQuery(
+            "SELECT flow_type,direction_text,trade_type,description FROM transactions WHERE id=?",
+            arrayOf(id.toString())
+        ).use { c ->
+            require(c.moveToFirst() && c.getString(0)=="EXPENSE" &&
+                ScanPaymentClassifier.isQrPayment(
+                    c.getString(1),c.getString(2),c.getString(3)
+                )) { "只能补充扫码消费的收款方" }
+        }
+        writableDatabase.insertWithOnConflict(
+            "scan_merchant_labels",null,ContentValues().apply {
+                put("transaction_id",id)
+                put("display_name",label)
+                put("updated_at",System.currentTimeMillis())
+            },SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    fun removeScanMerchantLabel(id:Long) {
+        writableDatabase.delete("scan_merchant_labels","transaction_id=?",
+            arrayOf(id.toString()))
+    }
+
+    fun manualScanLinks():Map<Long,Long> {
+        readableDatabase.rawQuery("SELECT manual_id,imported_id FROM manual_scan_links",null)
+            .use { c ->
+                return buildMap {
+                    while(c.moveToNext()) put(c.getLong(0),c.getLong(1))
+                }
+            }
+    }
+
+    fun addManualScanExpense(
+        merchant:String,amountCent:Long,occurredAt:Long,category:String,note:String
+    ):Long {
+        require(amountCent>0 && occurredAt>0 && category.isNotBlank())
+        require(merchant.trim().length in 1..100)
+        val id=writableDatabase.insertOrThrow(
+            "transactions",null,ContentValues().apply {
+                put("platform",Platform.UNKNOWN.name)
+                put("occurred_at",occurredAt)
+                put("counterparty",merchant.trim())
+                put("description",note.trim().ifBlank { "手动扫码消费" }.take(300))
+                put("direction_text","支出")
+                put("trade_type","手动扫码消费")
+                put("amount_cent",amountCent)
+                put("flow_type",FlowType.EXPENSE.name)
+                put("category",category)
+                put("nature_modified",1)
+                put("payment_method","手动登记")
+                put("transaction_id","")
+                put("merchant_order_id","")
+                put("source_file","手动记账")
+                put("fingerprint","manual:"+java.util.UUID.randomUUID().toString())
+            }
+        )
+        check(id>0) { "手动账单保存失败" }
+        return id
+    }
+
+    fun scanHistory(limit:Int=3000):List<Transaction> {
+        readableDatabase.query(
+            "transactions",null,
+            "(flow_type='EXPENSE' OR source_file='手动记账')",
+            null,null,null,"occurred_at DESC",
+            limit.coerceIn(1,10000).toString()
+        ).use { c ->
+            return buildList {
+                while(c.moveToNext()) {
+                    val tx=c.toTransaction()
+                    if(ScanPaymentClassifier.isQrPayment(
+                            tx.directionText,tx.tradeType,tx.description
+                        )) add(tx)
+                }
+            }
+        }
+    }
+
+    fun linkManualScanExpense(manualId:Long,importedId:Long) {
+        require(manualId!=importedId && manualId>0 && importedId>0)
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val m=db.rawQuery(
+                "SELECT amount_cent,occurred_at,flow_type,category,source_file " +
+                    "FROM transactions WHERE id=?",arrayOf(manualId.toString())
+            ).use { c ->
+                require(c.moveToFirst() && c.getString(4)=="手动记账" &&
+                    c.getString(2)=="EXPENSE") { "只能关联尚未关联的手动扫码消费" }
+                Triple(c.getLong(0),c.getLong(1),c.getString(3))
+            }
+            val target=db.rawQuery(
+                "SELECT amount_cent,occurred_at,flow_type,platform,trade_type,description,direction_text "+
+                    "FROM transactions WHERE id=?",arrayOf(importedId.toString())
+            ).use { c ->
+                require(c.moveToFirst() && c.getString(2)=="EXPENSE" &&
+                    c.getString(3)!=Platform.UNKNOWN.name &&
+                    ScanPaymentClassifier.isQrPayment(c.getString(6),c.getString(4),c.getString(5))) {
+                    "只能关联已经导入的扫码消费"
+                }
+                c.getLong(0) to c.getLong(1)
+            }
+            require(m.first==target.first &&
+                kotlin.math.abs(m.second-target.second)<=7L*24L*3600L*1000L) {
+                "仅可关联金额相等、日期相差不超过七天的消费"
+            }
+            db.insertOrThrow("manual_scan_links",null,ContentValues().apply {
+                put("manual_id",manualId)
+                put("imported_id",importedId)
+                put("original_category",m.third)
+                put("linked_at",System.currentTimeMillis())
+            })
+            check(db.update("transactions",ContentValues().apply {
+                put("flow_type",FlowType.IGNORE.name)
+                put("category","已关联原账单")
+            },"id=? AND source_file='手动记账' AND flow_type='EXPENSE'",
+                arrayOf(manualId.toString()))==1)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun unlinkManualScanExpense(manualId:Long) {
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val original=db.rawQuery(
+                "SELECT original_category FROM manual_scan_links WHERE manual_id=?",
+                arrayOf(manualId.toString())
+            ).use { c ->
+                require(c.moveToFirst()) { "该笔手动记录尚未关联" }
+                c.getString(0)
+            }
+            db.update("transactions",ContentValues().apply {
+                put("flow_type",FlowType.EXPENSE.name)
+                put("category",original)
+            },"id=? AND source_file='手动记账'",
+                arrayOf(manualId.toString()))
+            db.delete("manual_scan_links","manual_id=?",arrayOf(manualId.toString()))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun deleteManualScanExpense(id:Long) {
+        val linked=readableDatabase.rawQuery(
+            "SELECT 1 FROM manual_scan_links WHERE manual_id=? LIMIT 1",
+            arrayOf(id.toString())
+        ).use { it.moveToFirst() }
+        require(!linked) { "请先取消原账单关联" }
+        require(writableDatabase.delete("transactions",
+            "id=? AND source_file='手动记账'",arrayOf(id.toString()))==1) {
+            "手动记录不存在"
+        }
+        writableDatabase.delete("scan_merchant_labels","transaction_id=?",arrayOf(id.toString()))
     }
 
     fun merchantAliases(): Map<String, String> {
@@ -1144,6 +1373,11 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     fun updateNature(id: Long, flowType: FlowType, category: String) {
         require(id > 0) { "无效流水" }
         require(category.isNotBlank()) { "请选择分类" }
+        val linkedManualScan=readableDatabase.rawQuery(
+            "SELECT 1 FROM manual_scan_links WHERE manual_id=? OR imported_id=? LIMIT 1",
+            arrayOf(id.toString(),id.toString())
+        ).use { it.moveToFirst() }
+        require(!linkedManualScan) { "该笔扫码消费已关联手动记录，请先取消关联" }
         val linked = readableDatabase.rawQuery(
             "SELECT 1 FROM transaction_links WHERE expense_id=? OR receipt_id=? LIMIT 1",
             arrayOf(id.toString(), id.toString())
@@ -1187,7 +1421,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 "id=?",
                 arrayOf(id.toString())
             )
-            if (rememberMerchant && merchant.isNotBlank()) {
+            if (rememberMerchant && merchant.isNotBlank() &&
+                !ScanPaymentClassifier.isGenericCounterparty(merchant)) {
                 writableDatabase.insertWithOnConflict(
                     "merchant_rules",
                     null,
@@ -1552,7 +1787,10 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     fun saveCategoryRule(merchant: String, category: String, applyExisting: Boolean): Int {
         val key=merchant.trim()
-        require(key.isNotBlank() && key.length<=120 && category.isNotBlank())
+        require(key.isNotBlank() && key.length<=120 && category.isNotBlank() &&
+            !ScanPaymentClassifier.isGenericCounterparty(key)) {
+            "通用二维码名称不能记忆为商户，请在扫码消费中单独补名"
+        }
         val db=writableDatabase
         db.beginTransaction()
         try {
@@ -1621,6 +1859,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 8
+        private const val DB_VERSION = 9
     }
 }

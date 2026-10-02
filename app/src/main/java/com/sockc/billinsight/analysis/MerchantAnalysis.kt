@@ -2,6 +2,7 @@ package com.sockc.billinsight.analysis
 
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.Transaction
+import com.sockc.billinsight.importer.ScanPaymentClassifier
 
 data class MerchantGroup(
     val key: String,
@@ -23,8 +24,9 @@ object MerchantAnalysis {
         if (tx.flowType != FlowType.EXPENSE) return null
         val raw = tx.counterparty.trim()
         if (raw.isEmpty() || nonMerchants.any { raw.startsWith(it) }) return null
-        if (tx.tradeType.contains("收款") || tx.tradeType.contains("转账") ||
-            tx.tradeType.contains("红包")) return null
+        val qrPurchase=ScanPaymentClassifier.isQrExpense(tx)
+        if (!qrPurchase && (tx.tradeType.contains("收款") ||
+            tx.tradeType.contains("转账") || tx.tradeType.contains("红包"))) return null
         val pieces = raw.split(Regex("""\s*[·|｜]\s*""")).filter { it.isNotBlank() }
         val filtered = pieces.filter { it !in paymentPrefix }
         val candidate = when {
@@ -41,9 +43,13 @@ object MerchantAnalysis {
         }
     }
 
-    fun groups(transactions: List<Transaction>, aliases: Map<String, String> = emptyMap()): List<MerchantGroup> {
+    fun groups(
+        transactions: List<Transaction>,
+        aliases: Map<String,String> = emptyMap(),
+        labels: Map<Long,String> = emptyMap(),
+    ): List<MerchantGroup> {
         val mapped = transactions.mapNotNull { tx ->
-            merchantName(tx)?.let { original ->
+            (labels[tx.id] ?: merchantName(tx))?.let { original ->
                 val merged = aliases[original.trim().lowercase()]?.trim()?.takeIf { it.isNotBlank() } ?: original
                 merged.lowercase() to (merged to tx)
             }

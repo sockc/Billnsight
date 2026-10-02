@@ -186,7 +186,10 @@ fun MerchantRankCard(
                         merchantDialog = true
                     }) { Text("合并商户名称") }
                 }
-                val products = ProductAnalysis.groups(group.transactions, aliases)
+                val products = ProductAnalysis.groups(
+                    group.transactions, aliases,
+                    merchantLabels=group.transactions.associate { it.id to group.name }
+                )
                 products.forEach { product ->
                     val key = product.product
                     val opened = openProduct == key

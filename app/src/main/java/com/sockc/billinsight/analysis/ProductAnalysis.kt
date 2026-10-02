@@ -19,12 +19,14 @@ object ProductAnalysis {
         transactions: List<Transaction>,
         aliases: Map<String,String> = emptyMap(),
         merchantAliases: Map<String,String> = emptyMap(),
+        merchantLabels: Map<Long,String> = emptyMap(),
     ): List<ProductGroup> {
         val expenses = transactions.filter { it.flowType.countsAsExpense() }
         val grouped = expenses.groupBy { tx ->
-            val merchant = tx.counterparty.trim().ifBlank { "未知商户" }
+            val merchant = merchantLabels[tx.id] ?: tx.counterparty.trim().ifBlank { "未知商户" }
             val product = normalizeProduct(tx.description)
-            val resolvedMerchant = MerchantAnalysis.merchantName(tx)?.lowercase()?.let(merchantAliases::get)
+            val resolvedMerchant = merchantLabels[tx.id]
+                ?: MerchantAnalysis.merchantName(tx)?.lowercase()?.let(merchantAliases::get)
                 ?.trim()?.takeIf { it.isNotBlank() }
                 ?: MerchantAnalysis.merchantName(tx) ?: merchant
             resolvedMerchant.lowercase() to if (product in generic) "" else
@@ -33,7 +35,8 @@ object ProductAnalysis {
         return grouped.map { (key, entries) ->
             val unspecified = key.second.isEmpty()
             ProductGroup(
-                merchant = MerchantAnalysis.merchantName(entries.first())?.lowercase()?.let(merchantAliases::get)
+                merchant = merchantLabels[entries.first().id]
+                    ?: MerchantAnalysis.merchantName(entries.first())?.lowercase()?.let(merchantAliases::get)
                     ?: MerchantAnalysis.merchantName(entries.first())
                     ?: entries.first().counterparty.trim().ifBlank { "未知商户" },
                 product = if (unspecified) "商品未注明" else

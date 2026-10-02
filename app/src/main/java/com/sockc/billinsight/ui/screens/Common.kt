@@ -65,6 +65,10 @@ import java.time.format.DateTimeFormatter
 
 fun categoryColor(category: String): Color = when (category) {
     "餐饮" -> Color(0xFFE68B43)
+    "水果" -> Color(0xFF45A36E)
+    "买菜" -> Color(0xFF67B76D)
+    "饮品" -> Color(0xFF9C76CF)
+    "加油" -> Color(0xFFCF9134)
     "商超日用" -> Color(0xFFB48D2C)
     "购物" -> Color(0xFF9472CC)
     "交通", "车辆" -> Color(0xFF3988D3)
@@ -85,6 +89,9 @@ fun categoryColor(category: String): Color = when (category) {
 
 private fun categoryIcon(category: String): ImageVector = when (category) {
     "餐饮" -> Icons.Outlined.LocalDining
+    "水果","买菜" -> Icons.Outlined.Storefront
+    "饮品" -> Icons.Outlined.LocalDining
+    "加油" -> Icons.Outlined.DirectionsCar
     "商超日用" -> Icons.Outlined.Storefront
     "购物" -> Icons.Outlined.ShoppingBag
     "交通", "车辆" -> Icons.Outlined.DirectionsCar

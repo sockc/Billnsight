@@ -12,6 +12,7 @@ import com.sockc.billinsight.data.BackupManager
 import com.sockc.billinsight.data.DataAuditReport
 import com.sockc.billinsight.importer.BillImporter
 import com.sockc.billinsight.importer.ImportReview
+import com.sockc.billinsight.importer.ScanPaymentClassifier
 import com.sockc.billinsight.importer.PasswordRequiredException
 import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.DailyTotal
@@ -86,6 +87,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 val monthly = db.monthTransactions(month, platform)
                 val aliases = db.productAliases()
                 val merchantAliases = db.merchantAliases()
+                val scanLabels = db.scanMerchantLabels()
                 val history = if (merchantPeriod == "MONTH") monthly else
                     db.merchantHistoryTransactions(month, platform, merchantPeriod)
                 BillUiState(
@@ -94,6 +96,9 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     searchLimit = searchLimit,
                     searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit),
                     monthlyTransactions = monthly,
+                    scanMerchantLabels = scanLabels,
+                    manualScanLinks = db.manualScanLinks(),
+                    scanHistory = db.scanHistory(),
                     creditCenter = db.creditCenter(month),
                     creditHistory = db.creditHistory(),
                     loanHistory = db.loanHistory(),
@@ -104,12 +109,12 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     trendDetails = previousTrendDetails,
                     trendSelectionLabel = previousTrendLabel,
                     loanDetails = db.loanDetails(),
-                    productGroups = ProductAnalysis.groups(monthly, aliases, merchantAliases),
+                    productGroups = ProductAnalysis.groups(monthly, aliases, merchantAliases, scanLabels),
                     productAliases = aliases,
                     merchantAliases = merchantAliases,
                     merchantPeriod = merchantPeriod,
-                    merchantGroups = MerchantAnalysis.groups(history, merchantAliases),
-                    monthlyMerchantGroups = MerchantAnalysis.groups(monthly, merchantAliases),
+                    merchantGroups = MerchantAnalysis.groups(history, merchantAliases, scanLabels),
+                    monthlyMerchantGroups = MerchantAnalysis.groups(monthly, merchantAliases, scanLabels),
                     links = db.linksForMonth(month, platform),
                     linkedReceiptIds = db.linkedReceiptIds(),
                     linkableReceipts = db.searchTransactions("", null, "INCOME", 2000)
@@ -217,6 +222,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                             ignored=parsed.transactions.count { it.flowType==FlowType.IGNORE },
                             platform=parsed.platform,sourceName=parsed.sourceName,
                             startAt=preview.startAt,endAt=preview.endAt,
+                            qrExpenseCount=preview.qrExpenseCount,
+                            qrMerchantReviewCount=preview.qrMerchantReviewCount,
                         )
                     }
                 }
@@ -248,18 +255,32 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.value=_uiState.value.copy(lastImportResult=null)
     }
 
-    fun updateCategory(transaction: Transaction, category: String, rememberMerchant: Boolean = true) {
+    fun updateCategory(
+        transaction:Transaction, category:String, rememberMerchant:Boolean=true
+    ) {
+        val meaningfulMerchant=rememberMerchant &&
+            !ScanPaymentClassifier.isGenericCounterparty(transaction.counterparty)
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                synchronized(db) { db.updateCategory(transaction.id, transaction.counterparty, category, rememberMerchant) }
+            val result=runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) {
+                        db.updateCategory(transaction.id,transaction.counterparty,
+                            category,meaningfulMerchant)
+                    }
+                }
             }
-            _uiState.value = _uiState.value.copy(
-                message = "已改为 $category${if (rememberMerchant) "，并记住该商户" else ""}"
+            _uiState.value=_uiState.value.copy(
+                message=result.fold(
+                    onSuccess={
+                        "已改为 "+category+
+                            if(meaningfulMerchant) "，并记住该商户" else "（仅此交易）"
+                    },
+                    onFailure={ it.message?:"分类保存失败" }
+                )
             )
-            refresh()
+            if(result.isSuccess) refresh()
         }
     }
-
 
     private fun financeChange(success: String, action: BillDatabase.() -> Unit) {
         if (_uiState.value.isLoading) {
@@ -335,6 +356,35 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             trendDetails=emptyList(),trendSelectionLabel=null
         )
     }
+
+    fun saveScanMerchantLabel(id:Long,name:String) =
+        financeChange("已补充商户名称，原始账单保持不变") {
+            saveScanMerchantLabel(id,name)
+        }
+
+    fun removeScanMerchantLabel(id:Long) =
+        financeChange("已取消自定义商户名称") { removeScanMerchantLabel(id) }
+
+    fun addManualScanExpense(
+        merchant:String,amountCent:Long,occurredAt:Long,category:String,note:String
+    ) = financeChange("手动扫码消费已记录，导入正式账单后可关联去重") {
+        addManualScanExpense(merchant,amountCent,occurredAt,category,note)
+    }
+
+    fun linkManualScanExpense(manualId:Long,importedId:Long) =
+        financeChange("已关联正式账单，手动记录不再重复计入消费") {
+            linkManualScanExpense(manualId,importedId)
+        }
+
+    fun unlinkManualScanExpense(manualId:Long) =
+        financeChange("已解除关联，手动消费重新计入统计") {
+            unlinkManualScanExpense(manualId)
+        }
+
+    fun deleteManualScanExpense(id:Long) =
+        financeChange("已删除手动记录，导入账单不受影响") {
+            deleteManualScanExpense(id)
+        }
 
     fun previewCategoryRule(merchant:String) {
         if (merchant.isBlank()) {
@@ -665,6 +715,9 @@ data class BillUiState(
     val previousSummary: DashboardSummary = DashboardSummary(),
     val transactions: List<Transaction> = emptyList(),
     val monthlyTransactions: List<Transaction> = emptyList(),
+    val scanMerchantLabels: Map<Long,String> = emptyMap(),
+    val manualScanLinks: Map<Long,Long> = emptyMap(),
+    val scanHistory: List<Transaction> = emptyList(),
     val creditCenter: CreditCenter = CreditCenter(),
     val creditHistory: List<Transaction> = emptyList(),
     val trendDays: List<TrendPoint> = emptyList(),

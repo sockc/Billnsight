@@ -49,6 +49,7 @@ import com.sockc.billinsight.ui.screens.CreditCenterScreen
 import com.sockc.billinsight.ui.screens.LoanCenterScreen
 import com.sockc.billinsight.ui.screens.RuleCenterScreen
 import com.sockc.billinsight.ui.screens.TrendScreen
+import com.sockc.billinsight.ui.screens.ScanCenterScreen
 import com.sockc.billinsight.ui.screens.ImportPreviewDialog
 import com.sockc.billinsight.model.FlowType
 
@@ -186,10 +187,18 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     Text("解析 "+report.parsed+" 笔，新增 "+report.inserted+
                         " 笔，重复 "+report.duplicated+" 笔")
                     Text("已忽略 "+report.ignored+" 笔")
-                    Text("可到流水页查看所有导入记录及其识别性质。")
+                    Text("识别的扫码消费："+report.qrExpenseCount+" 笔")
+                    Text("扫码商户待补名："+report.qrMerchantReviewCount+" 笔")
+                    Text("可在扫码消费管理中补名及记忆分类，或到流水页核对全部记录。")
                 }
             },
             confirmButton={
+                TextButton(onClick={
+                    viewModel.clearImportReport()
+                    detailPage="scan"
+                }){Text("查看扫码消费")}
+            },
+            dismissButton={
                 TextButton(onClick=viewModel::clearImportReport){Text("完成")}
             },
         )
@@ -279,6 +288,19 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onSaveProductAlias=viewModel::saveProductAlias,
                     onDeleteProductAlias=viewModel::deleteProductAlias
                 )
+                "scan" -> ScanCenterScreen(
+                    state=state,
+                    onBack={detailPage=null},
+                    onPlatformChange=viewModel::setPlatformFilter,
+                    onUpdateCategory=viewModel::updateCategory,
+                    onSaveLabel=viewModel::saveScanMerchantLabel,
+                    onRemoveLabel=viewModel::removeScanMerchantLabel,
+                    onAddManual=viewModel::addManualScanExpense,
+                    onLink=viewModel::linkManualScanExpense,
+                    onUnlink=viewModel::unlinkManualScanExpense,
+                    onDeleteManual=viewModel::deleteManualScanExpense,
+                    onOpenRules={detailPage="rules"},
+                )
                 "trends" -> TrendScreen(
                     state=state,onBack={detailPage=null},
                     onSelect=viewModel::selectTrendRange,
@@ -297,6 +319,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onRecheckCredit = viewModel::recheckCreditRepayments,
                     onOpenCreditCenter={detailPage="credit"},
                     onOpenLoanCenter={detailPage="loans"},
+                    onOpenScanCenter={detailPage="scan"},
                 )
                 1 -> TransactionsScreen(
                     transactions = state.searchResults,
@@ -346,6 +369,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onOpenLoan={detailPage="loans"},
                     onOpenRules={detailPage="rules"},
                     onOpenTrends={detailPage="trends"},
+                    onOpenScan={detailPage="scan"},
                 )
                 }
             }

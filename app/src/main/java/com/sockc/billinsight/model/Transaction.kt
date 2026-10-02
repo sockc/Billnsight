@@ -101,6 +101,8 @@ data class ImportResult(
     val sourceName: String,
     val startAt: Long? = null,
     val endAt: Long? = null,
+    val qrExpenseCount: Int = 0,
+    val qrMerchantReviewCount: Int = 0,
 )
 
 data class ProductGroup(

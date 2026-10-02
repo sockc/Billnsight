@@ -50,6 +50,8 @@ fun ImportPreviewDialog(
                 Text("已有或文件内重复："+preview.duplicateCount+" 笔")
                 Text("待人工确认："+preview.pendingCount+" 笔")
                 Text("已识别信用卡还款："+preview.creditRepaymentCount+" 笔")
+                Text("扫码消费："+preview.qrExpenseCount+" 笔")
+                Text("扫码商户待补名："+preview.qrMerchantReviewCount+" 笔")
                 Text("日期无法解析："+preview.invalidTimeCount+" 笔",
                     color=if(preview.invalidTimeCount>0) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurface)

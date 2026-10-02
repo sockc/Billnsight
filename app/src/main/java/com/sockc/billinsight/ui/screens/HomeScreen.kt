@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.BillUiState
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.importer.ScanPaymentClassifier
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.util.toYuanText
 import java.time.YearMonth
@@ -59,6 +60,7 @@ fun HomeScreen(
     onRecheckCredit: () -> Unit,
     onOpenCreditCenter: () -> Unit,
     onOpenLoanCenter: () -> Unit,
+    onOpenScanCenter: () -> Unit,
 ) {
     val current=state.summary.netExpenseCent
     val previous=state.previousSummary.netExpenseCent
@@ -69,6 +71,10 @@ fun HomeScreen(
     }
     var creditDetailsOpen by remember(state.month,state.platformFilter) {
         mutableStateOf(false)
+    }
+    val qrPaid=state.monthlyTransactions.filter(ScanPaymentClassifier::isQrExpense)
+    val qrUnknown=qrPaid.count {
+        ScanPaymentClassifier.needsMerchantReview(it,state.scanMerchantLabels[it.id])
     }
     val creditTransactions = state.monthlyTransactions.filter {
         it.flowType == FlowType.CREDIT_REPAYMENT
@@ -221,6 +227,41 @@ fun HomeScreen(
                         onClick=onRecheckCredit,enabled=!state.isLoading,
                         modifier=Modifier.fillMaxWidth()
                     ) { Text("检查是否还有漏识别的旧记录") }
+                }
+            }
+        }
+
+        item {
+            Card(
+                Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp)
+                    .clickable(onClick=onOpenScanCenter),
+                shape=RoundedCornerShape(20.dp),
+                colors=CardDefaults.cardColors(
+                    containerColor=MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment=Alignment.CenterVertically,
+                    horizontalArrangement=Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f),
+                        verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                        Text("扫码消费 · 商家和个人收款码",
+                            style=MaterialTheme.typography.titleSmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(qrPaid.sumOf { it.amountCent }.toYuanText(),
+                            style=MaterialTheme.typography.headlineMedium,
+                            color=MaterialTheme.colorScheme.primary,
+                            fontWeight=FontWeight.Bold)
+                        Text(qrPaid.size.toString()+" 笔 · 待补商户 "+
+                            qrUnknown.toString()+" 笔 · 待分类 "+
+                            qrPaid.count { it.category=="其他" }.toString()+" 笔",
+                            style=MaterialTheme.typography.labelSmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text("管理 ›",color=MaterialTheme.colorScheme.primary,
+                        style=MaterialTheme.typography.labelLarge)
                 }
             }
         }

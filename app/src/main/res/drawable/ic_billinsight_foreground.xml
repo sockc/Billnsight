@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- A compact receipt with an ascending financial chart, matching the approved icon. -->
+    <path android:fillColor="#1879CA" android:fillAlpha="0.53"
+        android:pathData="M33,37 C35,32 39,31 44,31 L69,28 C74,28 77,32 78,38 L79,73 C79,82 71,85 57,87 L38,87 C32,86 29,80 29,74 L29,42 C29,39 30,37 33,37 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M30,41 C30,33 36,29 44,29 L67,27 C73,26 76,31 77,37 L78,74 C78,77 74,79 70,80 L44,85 C38,86 36,84 35,80 C33,77 33,72 33,64 L33,41 C33,33 30,35 30,41 Z" />
+    <path android:fillColor="#B7E5FA"
+        android:pathData="M30,41 C30,36 33,31 35,35 C37,38 37,44 37,47 L30,48 Z" />
+    <path android:fillColor="#59B9FA" android:strokeWidth="3.1"
+        android:strokeColor="#59B9FA" android:strokeLineCap="round"
+        android:pathData="M44,42 L64,39 M45,49 L55,47" />
+    <path android:fillColor="#19A6D0"
+        android:pathData="M45,67 C45,65 46,64 48,64 L50,64 C52,64 52,65 52,67 L52,78 L45,79 Z" />
+    <path android:fillColor="#14B9BC"
+        android:pathData="M55,59 C55,57 56,56 58,56 L60,56 C62,56 63,57 63,59 L63,76 L55,78 Z" />
+    <path android:fillColor="#24CF9B"
+        android:pathData="M66,51 C66,49 67,48 69,48 L72,48 C74,48 74,50 74,51 L74,74 L66,75 Z" />
+    <path android:fillColor="#B5F2E1"
+        android:pathData="M43,83 C50,77 62,79 78,75 C77,81 67,85 54,86 L44,87 Z" />
+    <path android:fillColor="#FFF7A8"
+        android:pathData="M81,26 C82,30 83,31 88,33 C83,34 82,36 81,40 C80,36 78,34 74,33 C79,32 80,30 81,26 Z" />
+</vector>

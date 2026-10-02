@@ -7,7 +7,7 @@ data class Classification(val flowType: FlowType, val category: String)
 object TransactionClassifier {
     val categories = listOf(
         "餐饮", "商超日用", "购物", "交通", "住房", "生活缴费", "娱乐", "医疗",
-        "人情", "车辆", "数码", "教育", "旅行", "经营相关", "其他"
+        "人情", "车辆", "数码", "教育", "旅行", "水果", "买菜", "饮品", "加油", "经营相关", "其他"
     )
 
     fun classify(
@@ -71,14 +71,16 @@ object TransactionClassifier {
         // change their nature per transaction (e.g. business proceeds or repayment).
         val qrReceipt = listOf("二维码收款", "收钱码", "面对面收款", "个人收款码", "扫码收款", "收款码收款")
             .any { kind.contains(it) }
-        val qrPayment = listOf("二维码付款", "扫码付款", "扫一扫付款", "付款码付款", "扫码支付")
-            .any { kind.contains(it) }
+        val qrPayment = ScanPaymentClassifier.isQrPayment(direction,type,description)
         if (qrReceipt && incoming) return Classification(FlowType.INCOME, "收入")
+        // Paying a friend's personal collection QR is normally a purchase too.
+        // Transfer wording does not overrule explicit outgoing QR evidence.
         if (qrPayment && outgoing) {
-            val category = merchantRules[merchant.trim()] ?: categoryFor(all)
-            return Classification(FlowType.EXPENSE, category)
+            val rule = merchant.takeUnless(ScanPaymentClassifier::isGenericCounterparty)
+                ?.let { merchantRules[it.trim()] }
+            return Classification(FlowType.EXPENSE, rule ?: categoryFor(all))
         }
-        if (qrReceipt || qrPayment) {
+        if (qrReceipt || kind.contains("二维码付款") || kind.contains("扫码支付")) {
             return Classification(FlowType.PENDING, "待确认")
         }
         if (kind.contains("转账")) {
@@ -96,11 +98,17 @@ object TransactionClassifier {
         if (flow != FlowType.EXPENSE) {
             return Classification(flow, if (flow == FlowType.INCOME) "收入" else "忽略")
         }
-        merchantRules[merchant.trim()]?.let { return Classification(FlowType.EXPENSE, it) }
+        if (!ScanPaymentClassifier.isGenericCounterparty(merchant)) {
+            merchantRules[merchant.trim()]?.let { return Classification(FlowType.EXPENSE, it) }
+        }
         return Classification(FlowType.EXPENSE, categoryFor(all))
     }
 
     private fun categoryFor(text: String): String = when {
+        has(text, "水果", "果园", "果业", "果蔬店", "榴莲", "荔枝", "西瓜", "水果摊") -> "水果"
+        has(text, "菜市场", "买菜", "菜摊", "蔬菜", "菜场", "生鲜市场") -> "买菜"
+        has(text, "奶茶", "咖啡", "瑞幸", "喜茶", "奈雪", "饮品", "果茶") -> "饮品"
+        has(text, "加油站", "加油", "汽油") -> "加油"
         has(text, "美团外卖", "饿了么", "餐饮", "饭店", "餐厅", "小吃", "麦当劳", "肯德基", "瑞幸", "咖啡", "奶茶", "喜茶", "奈雪", "烧烤", "火锅") -> "餐饮"
         has(text, "便利店", "超市", "商超", "百货", "日用品", "生活用品") -> "商超日用"
         has(text, "淘宝", "天猫", "京东", "拼多多", "唯品会", "购物", "商场", "服饰", "鞋", "包") -> "购物"

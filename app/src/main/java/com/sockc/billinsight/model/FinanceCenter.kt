@@ -48,6 +48,8 @@ data class ImportPreview(
     val invalidTimeCount: Int,
     val startAt: Long?,
     val endAt: Long?,
+    val qrExpenseCount: Int = 0,
+    val qrMerchantReviewCount: Int = 0,
 ) {
     val total: Int get() = transactions.size
     val canCommit: Boolean get() = total > 0 && platform != Platform.UNKNOWN &&

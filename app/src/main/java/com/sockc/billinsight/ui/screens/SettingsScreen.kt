@@ -43,6 +43,7 @@ fun SettingsScreen(
     onOpenLoan: () -> Unit,
     onOpenRules: () -> Unit,
     onOpenTrends: () -> Unit,
+    onOpenScan: () -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize(),
         verticalArrangement=Arrangement.spacedBy(5.dp)) {
@@ -62,6 +63,14 @@ fun SettingsScreen(
                     Icon(Icons.Outlined.FolderOpen,contentDescription=null)
                     Text("  导入账单")
                 }
+            }
+        }
+        item {
+            SettingsSection("扫码消费","扫码付款、临时记账和收款方整理") {
+                SettingsAction(
+                    "扫码消费管理","商家和朋友扫码付款默认消费，可补商户、记分类及关联正式账单",
+                    onOpenScan
+                )
             }
         }
         item {
