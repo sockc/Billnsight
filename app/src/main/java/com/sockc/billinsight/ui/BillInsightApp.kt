@@ -253,6 +253,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onPreview=viewModel::previewCategoryRule,
                     onSaveCategory=viewModel::saveCategoryRule,
                     onDeleteCategory=viewModel::deleteCategoryRule,
+                    onDeletePlatformCategory=viewModel::deletePlatformCategoryRule,
                     onSaveMerchantAlias=viewModel::saveMerchantAlias,
                     onDeleteMerchantAlias=viewModel::deleteMerchantAlias,
                     onSaveProductAlias=viewModel::saveProductAlias,
