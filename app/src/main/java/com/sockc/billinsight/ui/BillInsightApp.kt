@@ -325,6 +325,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onSelectPeriod=viewModel::setHomePeriod,
                     onChangeExpenseCategory=viewModel::changeExpenseCategory,
                     onPreviewExpenseCategory=viewModel::previewExpenseCategory,
+                    onReclassify=viewModel::reclassifyOtherExpenses,
                 )
                 else -> SettingsScreen(
                     state = state,

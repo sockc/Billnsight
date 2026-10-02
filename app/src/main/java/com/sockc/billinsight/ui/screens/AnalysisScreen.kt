@@ -29,11 +29,29 @@ fun AnalysisScreen(
     onSelectPeriod: (String,LocalDate?,LocalDate?) -> Unit,
     onChangeExpenseCategory: (Transaction,String,String) -> Unit,
     onPreviewExpenseCategory: (Transaction) -> Unit,
+    onReclassify: () -> Unit,
 ) {
     var section by remember { mutableStateOf("SPENDING") }
     var spendingRank by remember { mutableStateOf("CATEGORY") }
     var showTransfers by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<Transaction?>(null) }
+    var confirmReclassify by remember { mutableStateOf(false) }
+    if (confirmReclassify) {
+        AlertDialog(
+            onDismissRequest = { confirmReclassify = false },
+            title = { Text("自动识别其他消费？") },
+            text = { Text("将检查全账本尚未人工分类的“其他”消费，优先使用你保存的商户规则。不会更改手动分类、还款或资金流转。") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmReclassify = false
+                    onReclassify()
+                }) { Text("开始识别") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReclassify = false }) { Text("取消") }
+            }
+        )
+    }
     editingCategory?.let { tx ->
         ExpenseCategoryDialog(
             transaction=tx,
@@ -144,6 +162,12 @@ fun AnalysisScreen(
                                 }
                                 Text(group.amountCent.toYuanText(),fontWeight=FontWeight.Bold,
                                     style=MaterialTheme.typography.titleMedium)
+                            }
+                            if(group.category=="其他") {
+                                TextButton(onClick={confirmReclassify=true},
+                                    modifier=Modifier.padding(horizontal=9.dp)) {
+                                    Text("一键识别未分类账单")
+                                }
                             }
                             if(expanded) {
                                 HorizontalDivider()
