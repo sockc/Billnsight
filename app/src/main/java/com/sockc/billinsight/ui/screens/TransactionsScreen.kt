@@ -1,5 +1,6 @@
 package com.sockc.billinsight.ui.screens
 
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
