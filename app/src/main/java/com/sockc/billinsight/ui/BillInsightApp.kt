@@ -253,6 +253,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onPreview=viewModel::previewCategoryRule,
                     onSaveCategory=viewModel::saveCategoryRule,
                     onDeleteCategory=viewModel::deleteCategoryRule,
+                    onDeletePlatformCategory=viewModel::deletePlatformCategoryRule,
                     onSaveMerchantAlias=viewModel::saveMerchantAlias,
                     onDeleteMerchantAlias=viewModel::deleteMerchantAlias,
                     onSaveProductAlias=viewModel::saveProductAlias,
@@ -280,15 +281,23 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                 else -> when (selected) {
                 0 -> HomeScreen(
                     state=state,
-                    onPrevious=viewModel::previousMonth,
-                    onNext=viewModel::nextMonth,
                     onImport=openImport,
                     onPlatformChange=viewModel::setPlatformFilter,
                     onOpenAnalysis={selected=2},
                     onSelectMonth=viewModel::setHomeMonth,
                     onSelectPeriod=viewModel::setHomePeriod,
+                    onOpenLedgerFilter={ filter ->
+                        reviewMode=false
+                        viewModel.setSearchFlowFilter(filter)
+                        selected=1
+                    },
                 )
                 1 -> TransactionsScreen(
+                    state=state,
+                    onSelectMonth=viewModel::setHomeMonth,
+                    onSelectPeriod=viewModel::setHomePeriod,
+                    onChangeExpenseCategory=viewModel::changeExpenseCategory,
+                    onPreviewExpenseCategory=viewModel::previewExpenseCategory,
                     transactions = state.searchResults,
                     searchQuery = state.searchQuery,
                     onSearchQueryChange = viewModel::setSearchQuery,
@@ -311,8 +320,8 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                 2 -> AnalysisScreen(
                     state=state,
                     onPlatformChange=viewModel::setPlatformFilter,
-                    onPrevious=viewModel::previousMonth,
-                    onNext=viewModel::nextMonth,
+                    onSelectMonth=viewModel::setHomeMonth,
+                    onSelectPeriod=viewModel::setHomePeriod,
                 )
                 else -> SettingsScreen(
                     state = state,

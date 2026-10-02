@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.BillUiState
 import com.sockc.billinsight.importer.TransactionClassifier
+import com.sockc.billinsight.model.Platform
 
 @Composable
 fun RuleCenterScreen(
@@ -42,6 +43,7 @@ fun RuleCenterScreen(
     onPreview:(String)->Unit,
     onSaveCategory:(String,String,Boolean)->Unit,
     onDeleteCategory:(String)->Unit,
+    onDeletePlatformCategory:(Platform,String)->Unit,
     onSaveMerchantAlias:(String,String)->Unit,
     onDeleteMerchantAlias:(String)->Unit,
     onSaveProductAlias:(String,String,String)->Unit,
@@ -72,6 +74,8 @@ fun RuleCenterScreen(
                 Button(onClick={
                     when(kind) {
                         "category" -> onDeleteCategory(key)
+                        "scoped" -> onDeletePlatformCategory(
+                            Platform.valueOf(key.substringBefore('|')),key.substringAfter('|'))
                         "merchant" -> onDeleteMerchantAlias(key)
                         else -> onDeleteProductAlias(key)
                     }
@@ -242,7 +246,33 @@ fun RuleCenterScreen(
             )
         }
         if(tab=="category") {
-            item { SectionHeader("商户自动分类","新账单沿用规则；历史记录需明确确认后才修改") }
+            val scoped=state.platformCategoryRules.filter {
+                it.merchant.contains(search,true) || it.category.contains(search,true)
+            }
+            if(scoped.isNotEmpty()) {
+                item { SectionHeader("按账单来源记忆","仅匹配相同平台与明确商家名称") }
+                items(scoped,key={"scope_"+it.platform.name+"_"+it.merchant}) { rule ->
+                    Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                        shape=RoundedCornerShape(17.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(14.dp),
+                            horizontalArrangement=Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f),
+                                verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                                Text(rule.merchant,fontWeight=FontWeight.SemiBold)
+                                PlatformBadge(rule.platform)
+                                CategoryBadge(rule.category)
+                                Text("同平台尚未人工确认 ${rule.affectedCount} 笔（不会自动改旧账）",
+                                    style=MaterialTheme.typography.labelSmall,
+                                    color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(onClick={
+                                deleting="scoped" to (rule.platform.name+"|"+rule.merchant)
+                            }) {Text("删除")}
+                        }
+                    }
+                }
+            }
+            item { SectionHeader("通用商户规则","老规则；仅你确认后才修改历史交易") }
             val filtered=state.categoryRules.filter {
                 it.merchant.contains(search,true)||it.category.contains(search,true)
             }

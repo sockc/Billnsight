@@ -156,22 +156,61 @@ fun SectionHeader(title: String, detail: String? = null, trailing: @Composable (
 }
 
 @Composable
-fun MonthHeader(month: YearMonth, onPrevious: () -> Unit, onNext: () -> Unit) {
-    Surface(
-        modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp),
-        color=MaterialTheme.colorScheme.surface,
-        shape=RoundedCornerShape(17.dp),
-        border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant),
+fun PageTitleWithMonth(
+    title: String,subtitle: String,month: YearMonth,
+    onPrevious: () -> Unit,onNext: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(start=20.dp,end=14.dp,top=16.dp,bottom=6.dp),
+        horizontalArrangement=Arrangement.spacedBy(8.dp),
+        verticalAlignment=Alignment.CenterVertically
     ) {
-        Row(
-            Modifier.padding(horizontal=7.dp,vertical=1.dp),
-            horizontalArrangement=Arrangement.SpaceBetween,
-            verticalAlignment=Alignment.CenterVertically
-        ) {
-            TextButton(onClick=onPrevious) { Text("‹ 上月") }
-            Text("${month.year}年 ${month.monthValue}月",
-                style=MaterialTheme.typography.titleMedium)
-            TextButton(onClick=onNext) { Text("下月 ›") }
+        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)) {
+            Text(title,style=MaterialTheme.typography.headlineSmall,
+                fontWeight=FontWeight.Bold,maxLines=1)
+            Text(subtitle,style=MaterialTheme.typography.labelSmall,
+                color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,
+                overflow=TextOverflow.Ellipsis)
+        }
+        Surface(color=MaterialTheme.colorScheme.surface,
+            shape=RoundedCornerShape(13.dp),
+            border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) {
+            Row(Modifier.padding(horizontal=2.dp),
+                verticalAlignment=Alignment.CenterVertically) {
+                TextButton(onClick=onPrevious,
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=3.dp)
+                ){Text("‹")}
+                Text("${month.year}/${month.monthValue}",
+                    style=MaterialTheme.typography.labelMedium)
+                TextButton(onClick=onNext,
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=3.dp)
+                ){Text("›")}
+            }
+        }
+    }
+}
+
+@Composable
+fun MonthHeader(month: YearMonth, onPrevious: () -> Unit, onNext: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=2.dp),
+        horizontalArrangement=Arrangement.End
+    ) {
+        Surface(color=MaterialTheme.colorScheme.surface,
+            shape=RoundedCornerShape(13.dp),
+            border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) {
+            Row(Modifier.padding(horizontal=4.dp),
+                verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=Arrangement.spacedBy(1.dp)) {
+                TextButton(onClick=onPrevious,
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=5.dp,vertical=3.dp)
+                ){Text("‹")}
+                Text("${month.year}年${month.monthValue}月",
+                    style=MaterialTheme.typography.labelMedium)
+                TextButton(onClick=onNext,
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=5.dp,vertical=3.dp)
+                ){Text("›")}
+            }
         }
     }
 }
@@ -238,6 +277,7 @@ fun TransactionCard(
     item:Transaction,
     trailing:@Composable (() -> Unit)?=null,
     onMerchantClick:(()->Unit)?=null,
+    onCategoryClick:(()->Unit)?=null,
 ) {
     var expanded by remember(item.id) { mutableStateOf(false) }
     val incoming=item.directionText.contains("收入")
@@ -275,7 +315,9 @@ fun TransactionCard(
                     Row(verticalAlignment=Alignment.CenterVertically,
                         horizontalArrangement=Arrangement.spacedBy(5.dp)) {
                         PlatformBadge(item.platform)
-                        CategoryBadge(item.category)
+                        if(onCategoryClick!=null) Box(Modifier.clickable(onClick=onCategoryClick)) {
+                            CategoryBadge(item.category)
+                        } else CategoryBadge(item.category)
                     }
                 }
                 Column(horizontalAlignment=Alignment.End,

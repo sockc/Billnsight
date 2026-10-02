@@ -30,6 +30,8 @@ import com.sockc.billinsight.model.LinkKind
 import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
 import com.sockc.billinsight.model.ProductGroup
+import com.sockc.billinsight.model.ReportPeriod
+import com.sockc.billinsight.model.PlatformCategoryRule
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.RecurringExpense
 import com.sockc.billinsight.model.Transaction
@@ -63,7 +65,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     init { refresh() }
 
     fun setHomePeriod(key: String, customStart: LocalDate? = null, customEnd: LocalDate? = null) {
-        require(key in setOf("MONTH","LAST_MONTH","LAST_7","YEAR","LAST_YEAR","CUSTOM"))
+        require(key in setOf("MONTH","LAST_MONTH","LAST_7","YEAR","LAST_YEAR","CUSTOM","ALL_HISTORY"))
         if (key == "CUSTOM") require(customStart != null && customEnd != null && !customStart.isAfter(customEnd))
         homePeriodKey=key
         homeCustomStart=customStart
@@ -92,14 +94,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         val customStart=homeCustomStart
         val customEnd=homeCustomEnd
         val now=LocalDate.now()
-        val homeDates=when(homeKey) {
-            "LAST_7" -> now.minusDays(6) to now
-            "LAST_MONTH" -> YearMonth.from(now).minusMonths(1).atDay(1) to YearMonth.from(now).minusMonths(1).atEndOfMonth()
-            "YEAR" -> LocalDate.of(now.year,1,1) to now
-            "LAST_YEAR" -> LocalDate.of(now.year-1,1,1) to LocalDate.of(now.year-1,12,31)
-            "CUSTOM" -> (customStart ?: month.atDay(1)) to (customEnd ?: month.atEndOfMonth())
-            else -> month.atDay(1) to month.atEndOfMonth()
-        }
+        val homeDates=ReportPeriod.resolve(homeKey,month,customStart,customEnd,now)
         val homeStartMillis=homeDates.first.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val homeEndMillis=homeDates.second.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         viewModelScope.launch {
@@ -107,6 +102,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             val previousPreview = _uiState.value.importPreview
             val previousReport = _uiState.value.lastImportResult
             val previousAudit = _uiState.value.dataAudit
+            val previousCategoryPreviewId=_uiState.value.categoryPreviewId
+            val previousCategoryPreviewCount=_uiState.value.categoryPreviewCount
             val sameScope=_uiState.value.month==month &&
                 _uiState.value.platformFilter==platform
             val previousTrendDetails=if(sameScope) _uiState.value.trendDetails
@@ -118,6 +115,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 synchronized(db) {
                 val thresholdCent = smallThresholdYuan * 100L
                 val categories = db.categoryTotals(month, platform)
+                val rangeRows = db.rangeTransactions(homeStartMillis,homeEndMillis,platform,10000)
                 val monthly = db.monthTransactions(month, platform)
                 val aliases = db.productAliases()
                 val merchantAliases = db.merchantAliases()
@@ -125,11 +123,16 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 val history = if (merchantPeriod == "MONTH") monthly else
                     db.merchantHistoryTransactions(month, platform, merchantPeriod)
                 BillUiState(
+                    categoryPreviewId=previousCategoryPreviewId,
+                    categoryPreviewCount=previousCategoryPreviewCount,
                     searchQuery = searchQuery,
                     searchFlowFilter = searchFlowFilter,
                     searchLimit = searchLimit,
-                    searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit),
+                    searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit,homeStartMillis,homeEndMillis),
                     monthlyTransactions = monthly,
+                    periodTransactions = rangeRows,
+                    periodCategories = db.rangeCategoryTotals(homeStartMillis,homeEndMillis,platform),
+                    periodManualRepayments = if(platform==null) db.rangeManualCreditPayments(homeStartMillis,homeEndMillis) else emptyList(),
                     scanMerchantLabels = scanLabels,
                     manualScanLinks = db.manualScanLinks(),
                     scanHistory = db.scanHistory(),
@@ -138,6 +141,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     loanHistory = db.loanHistory(),
                     loanProfiles = db.loanProfiles(),
                     categoryRules = db.categoryRules(),
+                    platformCategoryRules = db.platformCategoryRules(),
                     trendDays = db.trend30(month,platform),
                     trendMonths = db.trend12(month,platform),
                     trendDetails = previousTrendDetails,
@@ -164,8 +168,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     summary = db.summary(month, platform, thresholdCent),
                     previousSummary = db.summary(month.minusMonths(1), platform, thresholdCent),
                     transactions = db.loadTransactions(platform),
-                    pendingTransactions = db.pendingTransactions(platform),
-                    pendingCount = db.pendingTotal(platform),
+                    pendingTransactions = db.pendingTransactions(platform,200,homeStartMillis,homeEndMillis),
+                    pendingCount = db.pendingTotal(platform,homeStartMillis,homeEndMillis),
                     categories = categories,
                     merchants = db.merchantTotals(month, platform),
                     categoryMerchants = categories.associate { category ->
@@ -213,7 +217,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                         uri,synchronized(db) { db.merchantRules() },zipPassword
                     )
                     val parsed=synchronized(db) {
-                        raw.copy(transactions=db.applyMerchantNatureRules(raw.transactions))
+                        raw.copy(transactions=db.applyPlatformCategoryRules(db.applyMerchantNatureRules(raw.transactions)))
                     }
                     val fingerprints=synchronized(db) {
                         db.existingFingerprints(parsed.transactions.map { it.fingerprint }) +
@@ -355,6 +359,43 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 )
             )
             if(result.isSuccess) refresh()
+        }
+    }
+
+    fun previewExpenseCategory(tx: Transaction) {
+        _uiState.value=_uiState.value.copy(categoryPreviewId=tx.id,categoryPreviewCount=null)
+        viewModelScope.launch {
+            val result=runCatching { withContext(Dispatchers.IO) {
+                synchronized(db) { db.platformCategoryRuleCount(tx) }
+            }}
+            if(_uiState.value.categoryPreviewId==tx.id) {
+                _uiState.value=_uiState.value.copy(
+                    categoryPreviewCount=result.getOrNull(),
+                    message=result.exceptionOrNull()?.message
+                )
+            }
+        }
+    }
+
+    fun changeExpenseCategory(tx: Transaction, category: String, scope: String) {
+        if(_uiState.value.isLoading) return
+        viewModelScope.launch {
+            val outcome=runCatching { withContext(Dispatchers.IO) {
+                synchronized(db) { db.changeExpenseCategory(tx.id,category,scope) }
+            }}
+            _uiState.value=_uiState.value.copy(
+                message=outcome.fold(
+                    onSuccess={ count -> when(scope) {
+                        "FUTURE" -> "已记住该商户以后导入的分类，历史记录不变"
+                        "MERCHANT" -> "已修改本笔并更新 ${(count-1).coerceAtLeast(0)} 笔未人工分类的历史消费"
+                        else -> "已修改当前这一笔分类"
+                    }},
+                    onFailure={it.message?:"分类保存失败"}
+                ),
+                categoryPreviewId=null,
+                categoryPreviewCount=null
+            )
+            if(outcome.isSuccess) refresh()
         }
     }
 
@@ -503,6 +544,11 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             if(result.isSuccess) refresh()
         }
     }
+
+    fun deletePlatformCategoryRule(platform:Platform,merchant:String) =
+        financeChange("已删除此来源下的自动分类规则，历史账单保留") {
+            deletePlatformCategoryRule(platform,merchant)
+        }
 
     fun deleteCategoryRule(merchant:String) =
         financeChange("已删除自动分类规则；历史流水未更改") {
@@ -758,7 +804,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun setSearchFlowFilter(flow: String) {
-        if (flow !in setOf("ALL", "EXPENSE", "INCOME", "OTHER")) return
+        if (flow !in setOf("ALL", "EXPENSE", "INCOME", "OTHER", "RECEIPTS", "OUTFLOW", "CONSUMPTION", "REPAYMENT")) return
         _uiState.value = _uiState.value.copy(searchFlowFilter = flow, searchLimit = 200)
         refresh(searchFlowFilter = flow, searchLimit = 200)
     }
@@ -799,6 +845,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
 
 data class BillUiState(
     val month: YearMonth = currentYearMonth(),
+    val categoryPreviewId: Long? = null,
+    val categoryPreviewCount: Int? = null,
     val homePeriod: String = "MONTH",
     val homeStart: LocalDate = LocalDate.now().withDayOfMonth(1),
     val homeEnd: LocalDate = LocalDate.now(),
@@ -810,6 +858,9 @@ data class BillUiState(
     val previousSummary: DashboardSummary = DashboardSummary(),
     val transactions: List<Transaction> = emptyList(),
     val monthlyTransactions: List<Transaction> = emptyList(),
+    val periodTransactions: List<Transaction> = emptyList(),
+    val periodCategories: List<CategoryTotal> = emptyList(),
+    val periodManualRepayments: List<ManualCreditRepayment> = emptyList(),
     val scanMerchantLabels: Map<Long,String> = emptyMap(),
     val manualScanLinks: Map<Long,Long> = emptyMap(),
     val scanHistory: List<Transaction> = emptyList(),
@@ -822,6 +873,7 @@ data class BillUiState(
     val loanHistory: List<Transaction> = emptyList(),
     val loanProfiles: List<LoanProfile> = emptyList(),
     val categoryRules: List<MerchantRule> = emptyList(),
+    val platformCategoryRules: List<PlatformCategoryRule> = emptyList(),
     val rulePreviewMerchant: String? = null,
     val rulePreviewCount: Int = 0,
     val importPreview: ImportPreview? = null,
