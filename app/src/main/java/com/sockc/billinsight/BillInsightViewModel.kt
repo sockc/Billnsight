@@ -202,7 +202,15 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                             message="已自动识别并导入 "+inserted+" 笔，跳过重复 "+
                                 duplicates+" 笔"
                         )
-                        refresh()
+                        val newest=parsed.transactions
+                            .filter { it.flowType!=FlowType.IGNORE }
+                            .maxOfOrNull { it.occurredAt }
+                        val target=if(inserted>0 && newest!=null)
+                            YearMonth.from(
+                                Instant.ofEpochMilli(newest)
+                                    .atZone(ZoneId.systemDefault())
+                            ) else _uiState.value.month
+                        refresh(month=target)
                     }.onFailure { error ->
                         pendingParsedBill=parsed
                         _uiState.value=_uiState.value.copy(
