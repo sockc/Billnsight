@@ -3,6 +3,7 @@ package com.sockc.billinsight.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -177,8 +178,9 @@ fun MonthHeader(month: YearMonth, onPrevious: () -> Unit, onNext: () -> Unit) {
 
 @Composable
 fun SourceFilterRow(selected: Platform?, onSelect: (Platform?) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+    LazyRow(
+        Modifier.fillMaxWidth().padding(vertical=4.dp),
+        contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=16.dp),
         horizontalArrangement=Arrangement.spacedBy(8.dp)
     ) {
         listOf(null to "全部",Platform.WECHAT to "微信",Platform.ALIPAY to "支付宝",Platform.JD to "京东",Platform.DOUYIN to "抖音",Platform.MEITUAN to "美团",Platform.BANK to "银行卡")
