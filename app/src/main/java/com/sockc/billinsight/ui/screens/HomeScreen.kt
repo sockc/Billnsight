@@ -1,6 +1,7 @@
 package com.sockc.billinsight.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,6 +56,7 @@ fun HomeScreen(
     onPlatformChange: (Platform?) -> Unit,
     onReviewPending: () -> Unit,
     onOpenAnalysis: () -> Unit,
+    onRecheckCredit: () -> Unit,
 ) {
     val current=state.summary.netExpenseCent
     val previous=state.previousSummary.netExpenseCent
@@ -62,6 +64,12 @@ fun HomeScreen(
     val percentage=if(previous>0L) delta*100.0/previous else null
     var expandedSummary by remember(state.month,state.platformFilter) {
         mutableStateOf<String?>(null)
+    }
+    var creditDetailsOpen by remember(state.month,state.platformFilter) {
+        mutableStateOf(false)
+    }
+    val creditTransactions = state.monthlyTransactions.filter {
+        it.flowType == FlowType.CREDIT_REPAYMENT
     }
     val income=state.monthlyTransactions.filter { tx ->
         tx.flowType in setOf(
@@ -143,12 +151,70 @@ fun HomeScreen(
                 Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                     HomeMetricCard(
                         label="信用卡还款",amount=state.summary.creditRepaymentCent,
-                        hint="${state.summary.creditRepaymentCount} 笔",
-                        tint=Color(0xFF9873C9),modifier=Modifier.weight(1f))
+                        hint="${state.summary.creditRepaymentCount} 笔 · 点击${if (creditDetailsOpen) "收起" else "核对"}",
+                        tint=Color(0xFF9873C9),modifier=Modifier.weight(1f),
+                        onClick={creditDetailsOpen=!creditDetailsOpen})
                     HomeMetricCard(
                         label="贷款还款",amount=state.summary.loanRepaymentCent,
                         hint="${state.summary.loanRepaymentCount} 笔 · 待拆分 ${state.summary.loanUnallocatedCent.toYuanText()}",
                         tint=Color(0xFFCB9444),modifier=Modifier.weight(1f))
+                }
+            }
+        }
+
+        if (creditDetailsOpen) {
+            item {
+                SectionHeader(
+                    "信用卡还款明细",
+                    "${state.month.year}年${state.month.monthValue}月 · ${platformLabel(state.platformFilter)} · " +
+                        "${creditTransactions.size} 笔"
+                )
+            }
+            if (creditTransactions.isEmpty()) {
+                item {
+                    Card(
+                        Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                        shape=RoundedCornerShape(18.dp),
+                        colors=CardDefaults.cardColors(
+                            containerColor=MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Column(Modifier.padding(16.dp),
+                            verticalArrangement=Arrangement.spacedBy(9.dp)) {
+                            Text("当前月份及账单来源暂无已识别的信用卡还款。",
+                                style=MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "可重新检查旧微信、支付宝账单。如果信用卡由银行卡直接自动扣款，" +
+                                    "而未经过微信或支付宝，则导出的账单不包含这笔还款。",
+                                style=MaterialTheme.typography.bodySmall,
+                                color=MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (state.platformFilter != null) {
+                                TextButton(onClick={onPlatformChange(null)}) {
+                                    Text("切换为全部账单来源")
+                                }
+                            }
+                            OutlinedButton(
+                                onClick=onRecheckCredit,
+                                enabled=!state.isLoading,
+                                modifier=Modifier.fillMaxWidth()
+                            ) { Text("重新识别旧账单") }
+                        }
+                    }
+                }
+            } else {
+                items(
+                    DailyLedger.group(creditTransactions),
+                    key={ "credit_${it.first}" }
+                ) { (day,transactions) ->
+                    DailyLedgerHeader(day,transactions)
+                    transactions.forEach { TransactionCard(it) }
+                }
+                item {
+                    TextButton(
+                        onClick=onRecheckCredit,enabled=!state.isLoading,
+                        modifier=Modifier.fillMaxWidth()
+                    ) { Text("检查是否还有漏识别的旧记录") }
                 }
             }
         }
@@ -264,9 +330,12 @@ fun HomeScreen(
 
 @Composable
 private fun HomeMetricCard(
-    label:String,amount:Long,hint:String,tint:Color,modifier:Modifier=Modifier
+    label:String,amount:Long,hint:String,tint:Color,modifier:Modifier=Modifier,
+    onClick:(()->Unit)?=null,
 ) {
-    Card(modifier=modifier,shape=RoundedCornerShape(19.dp),
+    Card(
+        modifier=if (onClick==null) modifier else modifier.clickable(onClick=onClick),
+        shape=RoundedCornerShape(19.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(7.dp)) {
             Box(Modifier.width(30.dp).height(4.dp)

@@ -17,6 +17,7 @@ object TransactionClassifier {
         description: String,
         status: String,
         merchantRules: Map<String, String>,
+        paymentMethod: String = "",
     ): Classification {
         val all = "$direction $type $merchant $description $status".lowercase()
         val kind = "$type $description".lowercase()
@@ -37,11 +38,11 @@ object TransactionClassifier {
                 else -> Classification(FlowType.PENDING, "待确认")
             }
         }
-        // A credit-card bill payment is a real cash outflow, but not a second purchase.
-        if (outgoing && (
-            listOf("信用卡还款", "还信用卡", "偿还信用卡").any { kind.contains(it) } ||
-            (kind.contains("信用卡") && listOf("分期还款", "账单还款", "自动还款").any { kind.contains(it) })
-        )) {
+        // Repayment destination can appear in the merchant field or payment method.
+        // Do not confuse a purchase paid WITH a credit card with paying off its bill.
+        if (CreditRepaymentDetector.isRepayment(
+                direction, type, merchant, description, paymentMethod, status
+            )) {
             return Classification(FlowType.CREDIT_REPAYMENT, "信用卡还款")
         }
         // Explicit loan disbursements are liabilities, not earned personal income.

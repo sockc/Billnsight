@@ -144,4 +144,38 @@ class TransactionClassifierTest {
         )
         assertEquals(FlowType.CREDIT_REPAYMENT,actual.flowType)
     }
+    @Test fun repaymentInCounterpartyIsNotLost() {
+        val actual = TransactionClassifier.classify(
+            direction = "支出", type = "商户消费", merchant = "招商银行信用卡还款",
+            description = "账单代扣", status = "支付成功", merchantRules = emptyMap(),
+        )
+        assertEquals(FlowType.CREDIT_REPAYMENT, actual.flowType)
+    }
+
+    @Test fun notCountedQrAndCardFundedPurchaseAreDistinct() {
+        val credit = TransactionClassifier.classify(
+            "不计收支", "信用卡账单还款", "中国银行", "本期还款", "成功", emptyMap()
+        )
+        assertEquals(FlowType.CREDIT_REPAYMENT, credit.flowType)
+        val purchase = TransactionClassifier.classify(
+            "支出", "商户消费", "便利店", "扫码购物", "成功", emptyMap(),
+            paymentMethod = "招商银行信用卡"
+        )
+        assertEquals(FlowType.EXPENSE, purchase.flowType)
+    }
+
+    @Test fun repaymentPaymentMethodFieldCanSupplyMissingDescription() {
+        val actual = TransactionClassifier.classify(
+            "支出", "商户消费", "招行信用卡", "账单付款", "成功", emptyMap(),
+            paymentMethod = "信用卡还款"
+        )
+        assertEquals(FlowType.CREDIT_REPAYMENT, actual.flowType)
+    }
+
+    @Test fun ordinaryMortgageMustStayLoanRepayment() {
+        val actual = TransactionClassifier.classify(
+            "支出", "贷款还款", "中国银行", "每月房贷还款", "成功", emptyMap()
+        )
+        assertEquals(FlowType.LOAN_REPAYMENT, actual.flowType)
+    }
 }

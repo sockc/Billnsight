@@ -153,6 +153,7 @@ class BillImporter(
             description = description,
             status = status,
             merchantRules = merchantRules,
+            paymentMethod = payment,
         )
         val occurredAt = parseDateTime(time)
         val fingerprint = fingerprint(

@@ -189,6 +189,32 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     }
 
 
+    fun recheckCreditRepayments() {
+        if (_uiState.value.isLoading) {
+            _uiState.value = _uiState.value.copy(message = "请等待当前操作完成")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true, message = null)
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.recheckCreditRepayments() }
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                message = result.fold(
+                    onSuccess = { count ->
+                        if (count > 0) "已补正 $count 笔旧账单信用卡还款，请核对当前月份和来源"
+                        else "旧账单中未找到可安全自动修正的还款；请检查月份、来源和原始账单"
+                    },
+                    onFailure = { it.message ?: "重新识别失败，请保留原始账单" }
+                )
+            )
+            if (result.isSuccess) refresh()
+        }
+    }
+
     fun saveLoanDetail(
         transactionId: Long, principalCent: Long, interestCent: Long, feeCent: Long
     ) {

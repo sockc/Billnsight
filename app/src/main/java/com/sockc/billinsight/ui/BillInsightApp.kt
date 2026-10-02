@@ -218,6 +218,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onPlatformChange = viewModel::setPlatformFilter,
                     onReviewPending = { reviewMode = true; selected = 1 },
                     onOpenAnalysis = { selected = 2 },
+                    onRecheckCredit = viewModel::recheckCreditRepayments,
                 )
                 1 -> TransactionsScreen(
                     transactions = state.searchResults,

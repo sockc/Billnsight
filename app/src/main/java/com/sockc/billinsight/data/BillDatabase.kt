@@ -9,6 +9,7 @@ import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.importer.CreditRepaymentDetector
 import com.sockc.billinsight.model.LoanRepaymentDetail
 import com.sockc.billinsight.model.LoanRepaymentPolicy
 import com.sockc.billinsight.analysis.MerchantAnalysis
@@ -38,6 +39,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 amount_cent INTEGER NOT NULL,
                 flow_type TEXT NOT NULL,
                 category TEXT NOT NULL,
+                nature_modified INTEGER NOT NULL DEFAULT 0,
                 payment_method TEXT NOT NULL,
                 transaction_id TEXT NOT NULL,
                 merchant_order_id TEXT NOT NULL,
@@ -145,6 +147,71 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 """.trimIndent()
             )
         }
+        if (oldVersion < 7) {
+            db.execSQL("ALTER TABLE transactions ADD COLUMN nature_modified INTEGER NOT NULL DEFAULT 0")
+            // V6 cannot identify every old manual edit; only unambiguous source
+            // descriptions or original trade types are repaired automatically.
+            backfillCreditRepayments(db, includeCounterparty = false)
+        }
+    }
+
+    private fun backfillCreditRepayments(
+        db: SQLiteDatabase, includeCounterparty: Boolean
+    ): Int {
+        val ids = mutableListOf<Long>()
+        db.rawQuery(
+            """
+            SELECT t.id,t.direction_text,t.trade_type,t.counterparty,t.description,
+                   t.payment_method,t.flow_type,t.category,
+                   EXISTS(SELECT 1 FROM loan_repayment_details d WHERE d.transaction_id=t.id),
+                   EXISTS(SELECT 1 FROM transaction_links l
+                          WHERE l.expense_id=t.id OR l.receipt_id=t.id)
+            FROM transactions t
+            WHERE t.nature_modified=0
+              AND t.flow_type IN ('TRANSFER','EXPENSE','PENDING','LOAN_REPAYMENT')
+              AND t.category IN ('资金流转','其他','待确认','贷款还款')
+            """.trimIndent(), null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val flow = runCatching { FlowType.valueOf(cursor.getString(6)) }.getOrNull()
+                    ?: continue
+                if (!CreditRepaymentDetector.isSafelyAutoCorrectable(
+                        flow, cursor.getString(7), cursor.getInt(8) != 0,
+                        cursor.getInt(9) != 0
+                    )) continue
+                if (CreditRepaymentDetector.isRepayment(
+                        direction = cursor.getString(1),
+                        tradeType = cursor.getString(2),
+                        counterparty = if (includeCounterparty) cursor.getString(3) else "",
+                        description = cursor.getString(4),
+                        paymentMethod = if (includeCounterparty) cursor.getString(5) else ""
+                    )) ids += cursor.getLong(0)
+            }
+        }
+        val values = ContentValues().apply {
+            put("flow_type", FlowType.CREDIT_REPAYMENT.name)
+            put("category", "信用卡还款")
+        }
+        var updated = 0
+        ids.forEach { id ->
+            updated += db.update(
+                "transactions", values, "id=? AND nature_modified=0",
+                arrayOf(id.toString())
+            )
+        }
+        return updated
+    }
+
+    fun recheckCreditRepayments(): Int {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val count = backfillCreditRepayments(db, includeCounterparty = true)
+            db.setTransactionSuccessful()
+            return count
+        } finally {
+            db.endTransaction()
+        }
     }
 
     private fun createLoanDetailsTable(db: SQLiteDatabase) {
@@ -216,6 +283,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     put("amount_cent", item.amountCent)
                     put("flow_type", item.flowType.name)
                     put("category", item.category)
+                    put("nature_modified", 0)
                     put("payment_method", item.paymentMethod)
                     put("transaction_id", item.transactionId)
                     put("merchant_order_id", item.merchantOrderId)
@@ -240,7 +308,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                                 put("category", item.category)
                                 put("trade_type", item.tradeType)
                             },
-                            "fingerprint=? AND flow_type='PENDING'",
+                            "fingerprint=? AND flow_type='PENDING' AND nature_modified=0",
                             arrayOf(item.fingerprint)
                         )
                     }
@@ -252,25 +320,17 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                                 put("category", "贷款还款")
                                 put("trade_type", item.tradeType)
                             },
-                            "fingerprint=? AND flow_type='TRANSFER' AND category='资金流转'",
+                            "fingerprint=? AND flow_type='TRANSFER' AND category='资金流转' AND nature_modified=0",
                             arrayOf(item.fingerprint)
                         )
                     }
-                    if (item.flowType == FlowType.CREDIT_REPAYMENT) {
-                        writableDatabase.update(
-                            "transactions",
-                            ContentValues().apply {
-                                put("flow_type", "CREDIT_REPAYMENT")
-                                put("category", "信用卡还款")
-                                put("trade_type", item.tradeType)
-                            },
-                            "fingerprint=? AND flow_type='TRANSFER' AND category='资金流转'",
-                            arrayOf(item.fingerprint),
-                        )
-                    }
+                    // Credit defaults are repaired in one batch after importing.
                 } else {
                     inserted++
                 }
+            }
+            if (items.any { it.flowType == FlowType.CREDIT_REPAYMENT }) {
+                backfillCreditRepayments(writableDatabase, includeCounterparty = true)
             }
             matchRefundsInTransaction(writableDatabase)
             writableDatabase.setTransactionSuccessful()
@@ -941,6 +1001,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             val values = ContentValues().apply {
                 put("flow_type", flowType.name)
                 put("category", category)
+                put("nature_modified", 1)
             }
             var updated = 0
             ids.forEach { id ->
@@ -1039,6 +1100,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             ContentValues().apply {
                 put("flow_type", flowType.name)
                 put("category", category)
+                put("nature_modified", 1)
             },
             "id=?",
             arrayOf(id.toString())
@@ -1050,7 +1112,10 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         try {
             writableDatabase.update(
                 "transactions",
-                ContentValues().apply { put("category", category) },
+                ContentValues().apply {
+                    put("category", category)
+                    put("nature_modified", 1)
+                },
                 "id=?",
                 arrayOf(id.toString())
             )
@@ -1067,7 +1132,10 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 )
                 writableDatabase.update(
                     "transactions",
-                    ContentValues().apply { put("category", category) },
+                    ContentValues().apply {
+                        put("category", category)
+                        put("nature_modified", 1)
+                    },
                     "counterparty=? AND flow_type='EXPENSE'",
                     arrayOf(merchant.trim())
                 )
@@ -1118,6 +1186,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 6
+        private const val DB_VERSION = 7
     }
 }
