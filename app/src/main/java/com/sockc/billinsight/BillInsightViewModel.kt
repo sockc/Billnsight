@@ -177,7 +177,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                         raw.copy(transactions=db.applyMerchantNatureRules(raw.transactions))
                     }
                     val fingerprints=synchronized(db) {
-                        db.existingFingerprints(parsed.transactions.map { it.fingerprint })
+                        db.existingFingerprints(parsed.transactions.map { it.fingerprint }) +
+                            db.crossPlatformDuplicateFingerprints(parsed.transactions)
                     }
                     parsed to ImportReview.preview(parsed,fingerprints)
                 }

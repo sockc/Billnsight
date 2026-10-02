@@ -1,6 +1,6 @@
 package com.sockc.billinsight.model
 
-enum class Platform { WECHAT, ALIPAY, UNKNOWN }
+enum class Platform { WECHAT, ALIPAY, JD, DOUYIN, MEITUAN, BANK, UNKNOWN }
 enum class FlowType {
     EXPENSE, INCOME, TRANSFER, REFUND, IGNORE,
     PENDING, GIFT_EXPENSE, GIFT_INCOME, LOAN_OUT, LOAN_RECOVERY,

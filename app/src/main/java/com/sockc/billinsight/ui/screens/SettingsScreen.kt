@@ -42,11 +42,11 @@ fun SettingsScreen(
                     Text(state.totalStored.toString()+" 笔已保存流水",
                         style=MaterialTheme.typography.headlineMedium,
                         color=MaterialTheme.colorScheme.primary)
-                    Text("只在本机解析微信、支付宝官方账单，不需要连接支付账户。",
+                    Text("只在本机解析微信、支付宝及支持的电商账单，不需要连接支付账户。",
                         style=MaterialTheme.typography.bodySmall,
                         color=MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick=onImport,modifier=Modifier.fillMaxWidth(),
-                        shape=RoundedCornerShape(13.dp)){Text("导入微信 / 支付宝账单")}
+                        shape=RoundedCornerShape(13.dp)){Text("导入微信 / 支付宝 / 京东 / 抖音 / 美团")}
                     Text("导入后自动识别、去重和统计，无须再配置分类。",
                         style=MaterialTheme.typography.bodySmall,
                         color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -106,7 +106,7 @@ fun SettingsScreen(
             }
         }
         item {
-            Text("BillInsight V0.2.2 · 本地优先 · 自动归类",
+            Text("BillInsight V0.2.3 · 本地优先 · 自动归类",
                 modifier=Modifier.fillMaxWidth().padding(vertical=19.dp),
                 textAlign=androidx.compose.ui.text.style.TextAlign.Center,
                 style=MaterialTheme.typography.labelSmall,
