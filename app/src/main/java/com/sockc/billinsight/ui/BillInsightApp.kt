@@ -6,6 +6,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.PersonOutline
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.NavigationBar
@@ -35,7 +45,7 @@ import com.sockc.billinsight.ui.screens.HomeScreen
 import com.sockc.billinsight.ui.screens.SettingsScreen
 import com.sockc.billinsight.ui.screens.TransactionsScreen
 
-private data class Destination(val label: String, val short: String)
+private data class Destination(val label: String, val icon: ImageVector)
 
 @Composable
 fun BillInsightApp(viewModel: BillInsightViewModel) {
@@ -45,11 +55,11 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
     val snackbar = remember { SnackbarHostState() }
     val destinations = remember {
         listOf(
-            Destination("首页", "首"),
-            Destination("流水", "流"),
-            Destination("分析", "析"),
-            Destination("发现", "发"),
-            Destination("我的", "我"),
+            Destination("首页", Icons.Outlined.Home),
+            Destination("流水", Icons.Outlined.ReceiptLong),
+            Destination("分析", Icons.Outlined.BarChart),
+            Destination("发现", Icons.Outlined.Explore),
+            Destination("我的", Icons.Outlined.PersonOutline),
         )
     }
 
@@ -180,14 +190,19 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
+        containerColor=MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                containerColor=MaterialTheme.colorScheme.surface,
+                tonalElevation=1.dp,
+            ) {
                 destinations.forEachIndexed { index, item ->
                     NavigationBarItem(
                         selected = selected == index,
                         onClick = { selected = index },
-                        icon = { Text(item.short) },
+                        icon = { Icon(item.icon,contentDescription=item.label) },
                         label = { Text(item.label) },
+                        alwaysShowLabel=true,
                     )
                 }
             }
@@ -202,6 +217,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onImport = openImport,
                     onPlatformChange = viewModel::setPlatformFilter,
                     onReviewPending = { reviewMode = true; selected = 1 },
+                    onOpenAnalysis = { selected = 2 },
                 )
                 1 -> TransactionsScreen(
                     transactions = state.searchResults,
@@ -218,6 +234,9 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     platformFilter = state.platformFilter,
                     onPlatformChange = viewModel::setPlatformFilter,
                     onNatureChange = viewModel::updateNature,
+                    loanDetails = state.loanDetails,
+                    onSaveLoan = viewModel::saveLoanDetail,
+                    onClearLoan = viewModel::clearLoanDetail,
                     onBulkConfirm = viewModel::bulkConfirmPending,
                 )
                 2 -> AnalysisScreen(
@@ -228,6 +247,8 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onMerchantPeriodChange = viewModel::setMerchantPeriod,
                     onLinkRecovery = viewModel::linkRecovery,
                     onDeleteLink = viewModel::unlinkRecovery,
+                    onSaveLoan = viewModel::saveLoanDetail,
+                    onClearLoan = viewModel::clearLoanDetail,
                 )
                 3 -> DiscoverScreen(
                     state = state,
@@ -240,6 +261,8 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onExportBackup = startBackup,
                     onRestoreBackup = startRestore,
                     onRunAudit = viewModel::runDataAudit,
+                    onOpenAnalysis = { selected = 2 },
+                    onOpenPending = { reviewMode = true; selected = 1 },
                 )
             }
 

@@ -6,12 +6,12 @@ data class ReviewCandidate(val id: Long, val direction: String, val flowType: Fl
 
 object BulkReviewPolicy {
     private val incoming = setOf(
-        FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY,
+        FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY, FlowType.LOAN_DISBURSEMENT,
         FlowType.BUSINESS_INCOME, FlowType.REFUND, FlowType.TRANSFER, FlowType.IGNORE,
     )
     private val outgoing = setOf(
         FlowType.EXPENSE, FlowType.GIFT_EXPENSE, FlowType.LOAN_OUT,
-        FlowType.BUSINESS_EXPENSE, FlowType.CREDIT_REPAYMENT,
+        FlowType.BUSINESS_EXPENSE, FlowType.CREDIT_REPAYMENT, FlowType.LOAN_REPAYMENT,
         FlowType.TRANSFER, FlowType.IGNORE,
     )
 

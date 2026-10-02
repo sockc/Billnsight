@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +42,8 @@ fun AnalysisScreen(
     onMerchantPeriodChange: (String) -> Unit,
     onLinkRecovery: (Long, Long, LinkKind, Long) -> Unit,
     onDeleteLink: (Long) -> Unit,
+    onSaveLoan: (Long,Long,Long,Long) -> Unit,
+    onClearLoan: (Long) -> Unit,
 ) {
     var expandedIncome by remember(state.month, state.platformFilter) { mutableStateOf<FlowType?>(null) }
     var expandedPayer by remember(state.month, state.platformFilter) { mutableStateOf<String?>(null) }
@@ -56,15 +60,22 @@ fun AnalysisScreen(
     val merchantMax = state.merchantGroups.maxOfOrNull { it.amountCent } ?: 1L
 
     LazyColumn(Modifier.fillMaxSize()) {
-        item { PageTitle("收支分析", "清晰查看每个商户的真实消费、收入及关联明细。") }
+        item { PageTitle("收支分析", "净消费、商户、收入和还款，各有清晰账目") }
         item { SourceFilterRow(state.platformFilter, onPlatformChange) }
 
         item {
-            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("本月净消费", style = MaterialTheme.typography.titleMedium)
+            Card(
+                Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp),
+                shape=RoundedCornerShape(22.dp),
+                colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Column(Modifier.padding(19.dp)) {
+                    Text("本月实际净消费",style=MaterialTheme.typography.titleMedium,
+                        color=MaterialTheme.colorScheme.onPrimaryContainer)
                     Text(state.summary.netExpenseCent.toYuanText(),
-                        style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        style=MaterialTheme.typography.headlineLarge,
+                        color=MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight=FontWeight.Bold)
                     Text(
                         "原始消费 ${state.summary.expenseCent.toYuanText()} − 已关联退款 " +
                             "${state.summary.linkedRefundCent.toYuanText()} − AA 收回 " +
@@ -80,9 +91,10 @@ fun AnalysisScreen(
         }
 
         item {
+            SectionHeader("同一商户消费排行","真实商户独立排行，点击查看每种商品的全部消费")
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Modifier.fillMaxWidth().padding(horizontal=16.dp),
+                horizontalArrangement=Arrangement.spacedBy(6.dp)
             ) {
                 listOf(
                     "MONTH" to "本月",
@@ -96,8 +108,6 @@ fun AnalysisScreen(
                     )
                 }
             }
-            Text("同一商户消费排行", style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp))
             Text(
                 "仅统计实际消费；商户别名可手动合并。全部历史最多读取最近 1 万笔消费。",
                 modifier = Modifier.padding(horizontal = 20.dp),
@@ -119,15 +129,20 @@ fun AnalysisScreen(
         }
 
         item {
-            Text("收入来源", style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp))
+            SectionHeader("贷款与还款","本金不计消费；拆分后仅利息与手续费计入金融费用")
+            LoanSection(state,onSaveLoan,onClearLoan)
         }
+        item { SectionHeader("收入来源","按付款人展开查看完整收款明细") }
         if (incomeGroups.isEmpty()) {
             item { Text("本月暂无收入流水", modifier = Modifier.padding(horizontal = 20.dp)) }
         } else {
             items(incomeGroups, key = { "income_${it.first}" }) { (type, records) ->
                 val isOpen = expandedIncome == type
-                Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
+                Card(
+                    Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=5.dp),
+                    shape=RoundedCornerShape(18.dp),
+                    colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)
+                ) {
                     Column(Modifier.padding(12.dp)) {
                         Row(Modifier.fillMaxWidth().clickable {
                             expandedIncome = if (isOpen) null else type
@@ -176,13 +191,14 @@ fun AnalysisScreen(
             }
         }
 
-        item {
-            Text("支出分类", style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp))
-        }
+        item { SectionHeader("消费分类","分类颜色与首页、流水保持一致") }
         items(state.categories, key = { "category_${it.category}" }) { category ->
             val open = expandedCategory == category.category
-            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
+            Card(
+                Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=5.dp),
+                shape=RoundedCornerShape(18.dp),
+                colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)
+            ) {
                 Column(Modifier.padding(14.dp)) {
                     Row(Modifier.fillMaxWidth().clickable {
                         expandedCategory = if (open) null else category.category
@@ -195,7 +211,11 @@ fun AnalysisScreen(
                         }
                         Text(category.amountCent.toYuanText(), fontWeight = FontWeight.Bold)
                     }
-                    if (open) {
+                    if(open) {
+                        if(category.category=="金融费用") {
+                            Text("已拆分贷款的利息与手续费汇总；详情见上方贷款与还款。",
+                                style=MaterialTheme.typography.bodySmall)
+                        }
                         val categoryTransactions = state.monthlyTransactions.filter {
                             it.category == category.category
                         }

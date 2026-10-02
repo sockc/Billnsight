@@ -110,4 +110,32 @@ class TransactionClassifierTest {
         val actual = TransactionClassifier.classify("支出", "零钱充值", "微信零钱", "充值", "成功", emptyMap())
         assertEquals(FlowType.TRANSFER, actual.flowType)
     }
+    @Test fun housingLoanRepaymentIsOutflowNotPurchase() {
+        val actual = TransactionClassifier.classify(
+            "支出","贷款还款","中国建设银行","2026年10月房贷还款","交易成功",emptyMap()
+        )
+        assertEquals(FlowType.LOAN_REPAYMENT,actual.flowType)
+        assertEquals("贷款还款",actual.category)
+    }
+
+    @Test fun consumerLoanRepaymentIsRecognized() {
+        val actual = TransactionClassifier.classify(
+            "支出","借呗还款","蚂蚁集团","本期分期还款","成功",emptyMap()
+        )
+        assertEquals(FlowType.LOAN_REPAYMENT,actual.flowType)
+    }
+
+    @Test fun loanProceedsAreNotPersonalIncome() {
+        val actual = TransactionClassifier.classify(
+            "收入","贷款发放","某银行","借款到账","成功",emptyMap()
+        )
+        assertEquals(FlowType.LOAN_DISBURSEMENT,actual.flowType)
+    }
+
+    @Test fun ordinaryPersonalTransferIsNotAutomaticallyLoanRepayment() {
+        val actual = TransactionClassifier.classify(
+            "支出","转账","张三","归还之前借的钱","成功",emptyMap()
+        )
+        assertEquals(FlowType.PENDING,actual.flowType)
+    }
 }

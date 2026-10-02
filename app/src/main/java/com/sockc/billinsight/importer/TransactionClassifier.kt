@@ -41,6 +41,23 @@ object TransactionClassifier {
         if (outgoing && listOf("信用卡还款", "还信用卡", "偿还信用卡").any { kind.contains(it) }) {
             return Classification(FlowType.CREDIT_REPAYMENT, "信用卡还款")
         }
+        // Explicit loan disbursements are liabilities, not earned personal income.
+        val loanDisbursement = listOf(
+            "贷款发放", "贷款放款", "贷款到账", "借款到账",
+            "借呗放款", "微粒贷放款", "网商贷放款", "借款发放"
+        ).any { kind.contains(it) }
+        if (incoming && loanDisbursement) {
+            return Classification(FlowType.LOAN_DISBURSEMENT, "贷款到账")
+        }
+        // Do not confuse a credit-card bill payment with loan instalments.
+        val loanRepayment = listOf(
+            "贷款还款", "房贷还款", "车贷还款", "借呗还款",
+            "微粒贷还款", "网商贷还款", "分期还款", "贷款扣款",
+            "贷款本息", "还本付息", "偿还贷款"
+        ).any { kind.contains(it) }
+        if (outgoing && loanRepayment) {
+            return Classification(FlowType.LOAN_REPAYMENT, "贷款还款")
+        }
         // Known movements between accounts are not personal consumption.
         if (listOf("充值", "提现", "余额宝", "零钱通", "资金转入", "资金转出")
                 .any { kind.contains(it) }) {

@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
+import com.sockc.billinsight.model.LoanRepaymentDetail
 
 @Composable
 fun TransactionsScreen(
@@ -35,6 +36,9 @@ fun TransactionsScreen(
     platformFilter: Platform?,
     onPlatformChange: (Platform?) -> Unit,
     onNatureChange: (Transaction, FlowType, String) -> Unit,
+    loanDetails: Map<Long,LoanRepaymentDetail>,
+    onSaveLoan: (Long,Long,Long,Long) -> Unit,
+    onClearLoan: (Long) -> Unit,
     onBulkConfirm: (List<Long>, FlowType, String) -> Unit,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
@@ -44,6 +48,11 @@ fun TransactionsScreen(
     onLoadMore: () -> Unit,
 ) {
     var editing by remember { mutableStateOf<Transaction?>(null) }
+    var editingLoan by remember { mutableStateOf<Transaction?>(null) }
+    editingLoan?.let { tx ->
+        LoanSplitDialog(transaction=tx,existing=loanDetails[tx.id],
+            onDismiss={editingLoan=null},onSave=onSaveLoan,onClear=onClearLoan)
+    }
     var selectedIds by remember(reviewMode, platformFilter) {
         mutableStateOf<Set<Long>>(emptySet())
     }
@@ -167,8 +176,16 @@ fun TransactionsScreen(
                     }
                 }
                 TransactionCard(tx) {
-                    TextButton(onClick = { editing = tx }) {
-                        Text(if (tx.flowType == FlowType.PENDING) "确认用途" else "修改性质")
+                    Row(Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                        TextButton(onClick={editing=tx}) {
+                            Text(if(tx.flowType==FlowType.PENDING) "确认用途" else "修改性质")
+                        }
+                        if(tx.flowType==FlowType.LOAN_REPAYMENT) {
+                            TextButton(onClick={editingLoan=tx}) {
+                                Text(if(loanDetails.containsKey(tx.id)) "修改还款拆分" else "拆分本金/利息")
+                            }
+                        }
                     }
                 }
             }

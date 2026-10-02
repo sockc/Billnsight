@@ -4,7 +4,7 @@ enum class Platform { WECHAT, ALIPAY, UNKNOWN }
 enum class FlowType {
     EXPENSE, INCOME, TRANSFER, REFUND, IGNORE,
     PENDING, GIFT_EXPENSE, GIFT_INCOME, LOAN_OUT, LOAN_RECOVERY,
-    BUSINESS_EXPENSE, BUSINESS_INCOME, CREDIT_REPAYMENT,
+    BUSINESS_EXPENSE, BUSINESS_INCOME, CREDIT_REPAYMENT, LOAN_REPAYMENT, LOAN_DISBURSEMENT,
 }
 
 fun FlowType.displayName(): String = when (this) {
@@ -21,6 +21,8 @@ fun FlowType.displayName(): String = when (this) {
     FlowType.BUSINESS_EXPENSE -> "经营支出"
     FlowType.BUSINESS_INCOME -> "经营收款"
     FlowType.CREDIT_REPAYMENT -> "信用卡还款"
+    FlowType.LOAN_REPAYMENT -> "贷款还款"
+    FlowType.LOAN_DISBURSEMENT -> "贷款到账"
 }
 
 fun FlowType.countsAsExpense(): Boolean =
@@ -66,6 +68,13 @@ data class DashboardSummary(
     val smallExpenseCount: Int = 0,
     val creditRepaymentCent: Long = 0,
     val creditRepaymentCount: Int = 0,
+    val loanRepaymentCent: Long = 0,
+    val loanRepaymentCount: Int = 0,
+    val loanDisbursementCent: Long = 0,
+    val loanPrincipalCent: Long = 0,
+    val loanInterestCent: Long = 0,
+    val loanFeeCent: Long = 0,
+    val loanUnallocatedCent: Long = 0,
     val businessExpenseCent: Long = 0,
     val loanOutCent: Long = 0,
     val linkedRefundCent: Long = 0,
@@ -76,7 +85,10 @@ data class DashboardSummary(
     val giftExpenseCount: Int = 0,
     val giftIncomeCount: Int = 0,
 ) {
-    val cashOutflowCent: Long get() = expenseCent + creditRepaymentCent + businessExpenseCent + loanOutCent
+    val loanFinanceCostCent: Long get() = loanInterestCent + loanFeeCent
+    val cashOutflowCent: Long get() =
+        expenseCent - loanFinanceCostCent + creditRepaymentCent + loanRepaymentCent +
+            businessExpenseCent + loanOutCent
     val netExpenseCent: Long get() = (expenseCent - linkedRefundCent - linkedShareCent).coerceAtLeast(0)
 }
 
@@ -110,3 +122,27 @@ data class ExpenseLink(
 )
 
 enum class LinkKind { REFUND, SHARE }
+
+/** Optional manual detail for one imported repayment; original transaction is immutable. */
+data class LoanRepaymentDetail(
+    val transactionId: Long,
+    val principalCent: Long,
+    val interestCent: Long,
+    val feeCent: Long,
+) {
+    val totalCent: Long get() = principalCent + interestCent + feeCent
+    val financeCostCent: Long get() = interestCent + feeCent
+}
+
+object LoanRepaymentPolicy {
+    fun validate(totalCent: Long, principalCent: Long, interestCent: Long, feeCent: Long) {
+        require(totalCent > 0 && principalCent >= 0 && interestCent >= 0 && feeCent >= 0) {
+            "还款金额及拆分金额不能为负数"
+        }
+        require(principalCent <= totalCent && interestCent <= totalCent &&
+            feeCent <= totalCent && principalCent <= totalCent - interestCent &&
+            feeCent == totalCent - principalCent - interestCent) {
+            "本金、利息及手续费的总和必须等于本次还款金额"
+        }
+    }
+}

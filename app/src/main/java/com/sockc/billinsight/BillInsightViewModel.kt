@@ -17,6 +17,7 @@ import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.ImportResult
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.model.LoanRepaymentDetail
 import com.sockc.billinsight.model.LinkKind
 import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
@@ -76,6 +77,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     searchLimit = searchLimit,
                     searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit),
                     monthlyTransactions = monthly,
+                    loanDetails = db.loanDetails(),
                     productGroups = ProductAnalysis.groups(monthly, aliases, merchantAliases),
                     productAliases = aliases,
                     merchantAliases = merchantAliases,
@@ -183,6 +185,45 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 message = "已改为 $category${if (rememberMerchant) "，并记住该商户" else ""}"
             )
             refresh()
+        }
+    }
+
+
+    fun saveLoanDetail(
+        transactionId: Long, principalCent: Long, interestCent: Long, feeCent: Long
+    ) {
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) {
+                        db.saveLoanDetail(transactionId,principalCent,interestCent,feeCent)
+                    }
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                dataAudit = null,
+                message = outcome.fold(
+                    onSuccess = { "贷款本金、利息和手续费已保存" },
+                    onFailure = { it.message ?: "贷款还款拆分保存失败" }
+                )
+            )
+            if (outcome.isSuccess) refresh()
+        }
+    }
+
+    fun clearLoanDetail(transactionId: Long) {
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) { db.clearLoanDetail(transactionId) }
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                dataAudit = null,
+                message = if (outcome.isSuccess) "已恢复为未拆分贷款还款"
+                else outcome.exceptionOrNull()?.message ?: "撤销拆分失败"
+            )
+            if (outcome.isSuccess) refresh()
         }
     }
 
@@ -394,6 +435,7 @@ data class BillUiState(
     val previousSummary: DashboardSummary = DashboardSummary(),
     val transactions: List<Transaction> = emptyList(),
     val monthlyTransactions: List<Transaction> = emptyList(),
+    val loanDetails: Map<Long, LoanRepaymentDetail> = emptyMap(),
     val productGroups: List<ProductGroup> = emptyList(),
     val productAliases: Map<String,String> = emptyMap(),
     val merchantAliases: Map<String,String> = emptyMap(),

@@ -44,11 +44,11 @@ fun BulkReviewDialog(
         directions.single() != "UNKNOWN"
     val incoming = valid && directions.single() == "IN"
     val options = if (incoming) listOf(
-        FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY,
+        FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY, FlowType.LOAN_DISBURSEMENT,
         FlowType.BUSINESS_INCOME, FlowType.REFUND, FlowType.TRANSFER, FlowType.IGNORE
     ) else listOf(
         FlowType.EXPENSE, FlowType.GIFT_EXPENSE, FlowType.LOAN_OUT,
-        FlowType.BUSINESS_EXPENSE, FlowType.CREDIT_REPAYMENT,
+        FlowType.BUSINESS_EXPENSE, FlowType.CREDIT_REPAYMENT, FlowType.LOAN_REPAYMENT,
         FlowType.TRANSFER, FlowType.IGNORE
     )
     var target by remember(selected.map { it.id }) { mutableStateOf<FlowType?>(null) }
@@ -107,6 +107,8 @@ fun BulkReviewDialog(
                         FlowType.LOAN_OUT -> "借出款"
                         FlowType.LOAN_RECOVERY -> "借款收回"
                         FlowType.CREDIT_REPAYMENT -> "信用卡还款"
+                        FlowType.LOAN_REPAYMENT -> "贷款还款"
+                        FlowType.LOAN_DISBURSEMENT -> "贷款到账"
                         FlowType.REFUND -> "退款"
                         FlowType.TRANSFER -> "资金流转"
                         FlowType.IGNORE -> "忽略"

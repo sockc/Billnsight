@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -33,11 +34,15 @@ fun DiscoverScreen(
     onSmallThresholdChange: (Int) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
-        item { PageTitle("钱去哪了", "找小额高频、固定支出、大额消费和每天的花钱节奏。") }
+        item { PageTitle("消费发现", "关注你的消费习惯，而不只是月末总数") }
         item { SourceFilterRow(state.platformFilter, onPlatformChange) }
 
         item {
-            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+            Card(
+                Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp),
+                shape=androidx.compose.foundation.shape.RoundedCornerShape(19.dp),
+                colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)
+            ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("小额高频", fontWeight = FontWeight.Bold)
                     Row(
@@ -81,39 +86,10 @@ fun DiscoverScreen(
                 )
             }
         }
-        item {
-            InsightCard(
-                title = "信用卡还款",
-                main = state.summary.creditRepaymentCent.toYuanText(),
-                detail = "${state.summary.creditRepaymentCount} 笔 · 计入资金支出，不重复计入实际消费",
-            )
-        }
-        item {
-            InsightCard(
-                title = "转账与资金流转",
-                main = state.summary.transferCent.toYuanText(),
-                detail = "这部分不算消费，避免银行卡→微信→付款被重复计算。",
-            )
-        }
-
-        item {
-            Text(
-                "消费日历",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-            )
-        }
+        item { SectionHeader("消费日历","每天花费越多，色块越明显") }
         item { ConsumptionCalendar(state) }
 
-        item {
-            Text(
-                "疑似固定支出",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)
-            )
-        }
+        item { SectionHeader("疑似固定支出","连续多月、金额稳定的商户支出") }
         if (state.recurringExpenses.isEmpty()) {
             item {
                 Text(
@@ -138,32 +114,36 @@ fun DiscoverScreen(
             }
         }
 
-        item {
-            Text(
-                "本月最大支出",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(20.dp)
-            )
-        }
+        item { SectionHeader("本月最大单笔消费","点开任一交易查看原始明细") }
         items(state.largestExpenses) { TransactionCard(it) }
 
-        item {
-            Text(
-                "高频 / 高额商户",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(20.dp)
-            )
-        }
-        items(state.monthlyMerchantGroups.take(10)) { item ->
-            val rank = state.monthlyMerchantGroups.indexOfFirst { it.key == item.key } + 1
-            MerchantRankCard(
-                rank = rank,
-                group = item,
-                maxAmount = state.monthlyMerchantGroups.firstOrNull()?.amountCent ?: 1L,
-                aliases = state.productAliases,
-            )
+        item { SectionHeader("常去的商户","按消费次数排序，不重复展示分析页的金额排行") }
+        items(
+            state.monthlyMerchantGroups.sortedWith(
+                compareByDescending<com.sockc.billinsight.analysis.MerchantGroup> { it.count }
+                    .thenByDescending { it.amountCent }
+            ).take(5),
+            key={it.key}
+        ) { merchant ->
+            Card(
+                Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
+                shape=androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(14.dp),
+                    horizontalArrangement=Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(merchant.name,fontWeight=FontWeight.SemiBold,
+                            style=MaterialTheme.typography.bodyMedium,maxLines=2)
+                        Text("${merchant.count} 笔消费",
+                            style=MaterialTheme.typography.bodySmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(merchant.amountCent.toYuanText(),fontWeight=FontWeight.Bold)
+                }
+            }
         }
     }
 }

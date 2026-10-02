@@ -11,9 +11,11 @@ data class DataAuditReport(
     val brokenLinks: Int,
     val expenseDifferenceCent: Long,
     val databaseIntegrityOk: Boolean,
+    val loanBreakdownInvalid: Int = 0,
+    val loanUnallocatedCount: Int = 0,
 ) {
     val needsAttention: Boolean get() =
         !databaseIntegrityOk || nonPositiveAmounts > 0 || directionMismatches > 0 ||
-            duplicatePlatformOrderIds > 0 || brokenLinks > 0 || expenseDifferenceCent != 0L
-    val hasFollowUp: Boolean get() = pendingTransactions > 0 || unmatchedRefunds > 0
+            duplicatePlatformOrderIds > 0 || brokenLinks > 0 || loanBreakdownInvalid > 0 || expenseDifferenceCent != 0L
+    val hasFollowUp: Boolean get() = pendingTransactions > 0 || unmatchedRefunds > 0 || loanUnallocatedCount > 0
 }

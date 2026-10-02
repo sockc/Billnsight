@@ -81,6 +81,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("net.lingala.zip4j:zip4j:2.11.6")
 
     debugImplementation("androidx.compose.ui:ui-tooling")

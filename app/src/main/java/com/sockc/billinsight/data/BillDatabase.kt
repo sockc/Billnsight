@@ -9,6 +9,8 @@ import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.model.LoanRepaymentDetail
+import com.sockc.billinsight.model.LoanRepaymentPolicy
 import com.sockc.billinsight.analysis.MerchantAnalysis
 import com.sockc.billinsight.model.LinkKind
 import com.sockc.billinsight.model.ExpenseLink
@@ -49,6 +51,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         db.execSQL("CREATE INDEX idx_transactions_category ON transactions(category)")
         db.execSQL("CREATE INDEX idx_transactions_platform ON transactions(platform)")
         createLinkAndAliasTables(db)
+        createLoanDetailsTable(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -126,6 +129,36 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         if (oldVersion < 5) {
             createMerchantAliasesTable(db)
         }
+        if (oldVersion < 6) {
+            createLoanDetailsTable(db)
+            // Move ONLY untouched auto-classified account transfers with explicit
+            // loan-repayment trade types. User-selected categories remain intact.
+            db.execSQL(
+                """
+                UPDATE transactions SET flow_type='LOAN_REPAYMENT', category='贷款还款'
+                WHERE flow_type='TRANSFER' AND category='资金流转'
+                  AND direction_text LIKE '%支出%'
+                  AND (trade_type LIKE '%贷款还款%' OR trade_type LIKE '%房贷还款%'
+                       OR trade_type LIKE '%车贷还款%' OR trade_type LIKE '%借呗还款%'
+                       OR trade_type LIKE '%微粒贷还款%' OR trade_type LIKE '%网商贷还款%'
+                       OR trade_type LIKE '%贷款扣款%' OR trade_type LIKE '%分期还款%')
+                """.trimIndent()
+            )
+        }
+    }
+
+    private fun createLoanDetailsTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS loan_repayment_details (
+                transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id),
+                principal_cent INTEGER NOT NULL CHECK (principal_cent >= 0),
+                interest_cent INTEGER NOT NULL CHECK (interest_cent >= 0),
+                fee_cent INTEGER NOT NULL CHECK (fee_cent >= 0),
+                updated_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
     }
 
     private fun createMerchantAliasesTable(db: SQLiteDatabase) {
@@ -211,6 +244,18 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                             arrayOf(item.fingerprint)
                         )
                     }
+                    if (item.flowType == FlowType.LOAN_REPAYMENT) {
+                        writableDatabase.update(
+                            "transactions",
+                            ContentValues().apply {
+                                put("flow_type", "LOAN_REPAYMENT")
+                                put("category", "贷款还款")
+                                put("trade_type", item.tradeType)
+                            },
+                            "fingerprint=? AND flow_type='TRANSFER' AND category='资金流转'",
+                            arrayOf(item.fingerprint)
+                        )
+                    }
                     if (item.flowType == FlowType.CREDIT_REPAYMENT) {
                         writableDatabase.update(
                             "transactions",
@@ -278,8 +323,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             args += it.name
         }
         when (flowFilter) {
-            "EXPENSE" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT')"
-            "INCOME" -> where += "flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY','REFUND')"
+            "EXPENSE" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT','LOAN_REPAYMENT')"
+            "INCOME" -> where += "flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY','LOAN_DISBURSEMENT','REFUND')"
             "OTHER" -> where += "flow_type IN ('TRANSFER','PENDING','IGNORE')"
         }
         if (query.isNotBlank()) {
@@ -510,6 +555,75 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
     }
 
+    private fun loanTotals(month: YearMonth, platform: Platform?): LongArray {
+        val (start, end) = monthRange(month)
+        val extra = if (platform == null) "" else " AND t.platform=?"
+        val args = mutableListOf(start.toString(), end.toString())
+        platform?.let { args += it.name }
+        readableDatabase.rawQuery(
+            """
+            SELECT COALESCE(SUM(t.amount_cent),0), COUNT(t.id),
+                   COALESCE(SUM(d.principal_cent),0),
+                   COALESCE(SUM(d.interest_cent),0),
+                   COALESCE(SUM(d.fee_cent),0)
+            FROM transactions t LEFT JOIN loan_repayment_details d
+              ON d.transaction_id=t.id
+            WHERE t.flow_type='LOAN_REPAYMENT'
+              AND t.occurred_at>=? AND t.occurred_at<?$extra
+            """.trimIndent(), args.toTypedArray()
+        ).use { c ->
+            c.moveToFirst()
+            return LongArray(5) { c.getLong(it) }
+        }
+    }
+
+    fun loanDetails(): Map<Long, LoanRepaymentDetail> {
+        readableDatabase.rawQuery(
+            "SELECT transaction_id,principal_cent,interest_cent,fee_cent FROM loan_repayment_details",
+            null
+        ).use { c ->
+            return buildMap {
+                while (c.moveToNext()) {
+                    put(c.getLong(0), LoanRepaymentDetail(
+                        c.getLong(0), c.getLong(1), c.getLong(2), c.getLong(3)
+                    ))
+                }
+            }
+        }
+    }
+
+    fun saveLoanDetail(
+        transactionId: Long, principalCent: Long, interestCent: Long, feeCent: Long
+    ) {
+        val repayment = readableDatabase.rawQuery(
+            "SELECT amount_cent,flow_type FROM transactions WHERE id=?",
+            arrayOf(transactionId.toString())
+        ).use { c ->
+            require(c.moveToFirst()) { "找不到这笔贷款还款" }
+            c.getLong(0) to c.getString(1)
+        }
+        require(repayment.second == "LOAN_REPAYMENT") { "仅贷款还款支持本金/利息拆分" }
+        LoanRepaymentPolicy.validate(repayment.first, principalCent, interestCent, feeCent)
+        writableDatabase.insertWithOnConflict(
+            "loan_repayment_details", null,
+            ContentValues().apply {
+                put("transaction_id", transactionId)
+                put("principal_cent", principalCent)
+                put("interest_cent", interestCent)
+                put("fee_cent", feeCent)
+                put("updated_at", System.currentTimeMillis())
+            }, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    fun clearLoanDetail(transactionId: Long) {
+        require(transactionId > 0)
+        writableDatabase.delete(
+            "loan_repayment_details", "transaction_id=?",
+            arrayOf(transactionId.toString())
+        )
+    }
+
     fun summary(
         month: YearMonth,
         platform: Platform? = null,
@@ -552,14 +666,31 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
             c.moveToFirst()
             val linked = linkedRecovery(month, platform)
+            val loan = loanTotals(month, platform)
+            val financeCost = loan[3] + loan[4]
+            val disbursed = readableDatabase.rawQuery(
+                "SELECT COALESCE(SUM(amount_cent),0) FROM transactions WHERE " +
+                    "flow_type='LOAN_DISBURSEMENT' AND occurred_at>=? AND occurred_at<?" +
+                    if (platform == null) "" else " AND platform=?",
+                mutableListOf(start.toString(),end.toString()).apply {
+                    platform?.let { add(it.name) }
+                }.toTypedArray()
+            ).use { x -> x.moveToFirst(); x.getLong(0) }
             return DashboardSummary(
+                loanRepaymentCent = loan[0],
+                loanRepaymentCount = loan[1].toInt(),
+                loanDisbursementCent = disbursed,
+                loanPrincipalCent = loan[2],
+                loanInterestCent = loan[3],
+                loanFeeCent = loan[4],
+                loanUnallocatedCent = loan[0] - loan[2] - financeCost,
                 linkedRefundCent = linked.first,
                 linkedShareCent = linked.second,
                 creditRepaymentCent = c.getLong(12),
                 creditRepaymentCount = c.getInt(13),
                 businessExpenseCent = c.getLong(14),
                 loanOutCent = c.getLong(15),
-                expenseCent = c.getLong(0),
+                expenseCent = c.getLong(0) + financeCost,
                 incomeCent = c.getLong(1),
                 refundCent = c.getLong(2),
                 transferCent = c.getLong(3),
@@ -590,11 +721,17 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         platform?.let { args += it.name }
         args += limit.toString()
 
-        readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
-            return buildList {
+        val results = readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
+            buildList {
                 while (c.moveToNext()) add(CategoryTotal(c.getString(0), c.getLong(1), c.getInt(2)))
             }
         }
+        val finance = loanTotals(month, platform)
+        val cost = finance[3] + finance[4]
+        val categories = if (cost > 0) {
+            results + CategoryTotal("金融费用", cost, finance[1].toInt())
+        } else results
+        return categories.sortedByDescending { it.amountCent }.take(limit)
     }
 
     fun merchantTotals(
@@ -665,11 +802,35 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         val args = mutableListOf(start.toString(), end.toString())
         platform?.let { args += it.name }
 
-        readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
-            return buildList {
+        val totals = readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
+            buildList {
                 while (c.moveToNext()) add(DailyTotal(c.getInt(0), c.getLong(1), c.getInt(2)))
             }
+        }.associateBy { it.dayOfMonth }.toMutableMap()
+        val extra = if (platform == null) "" else " AND t.platform=?"
+        val financeArgs = mutableListOf(start.toString(), end.toString())
+        platform?.let { financeArgs += it.name }
+        readableDatabase.rawQuery(
+            """
+            SELECT CAST(strftime('%d',t.occurred_at/1000,'unixepoch','localtime') AS INTEGER),
+                   SUM(d.interest_cent+d.fee_cent),COUNT(*)
+            FROM transactions t JOIN loan_repayment_details d ON d.transaction_id=t.id
+            WHERE t.flow_type='LOAN_REPAYMENT' AND t.occurred_at>=?
+              AND t.occurred_at<?$extra
+            GROUP BY 1
+            HAVING SUM(d.interest_cent+d.fee_cent)>0
+            """.trimIndent(), financeArgs.toTypedArray()
+        ).use { c ->
+            while (c.moveToNext()) {
+                val day=c.getInt(0)
+                val old=totals[day]
+                totals[day]=DailyTotal(
+                    day, (old?.amountCent ?: 0L)+c.getLong(1),
+                    (old?.count ?: 0)+c.getInt(2)
+                )
+            }
         }
+        return totals.values.sortedBy { it.dayOfMonth }
     }
 
     fun recurringExpenses(
@@ -809,9 +970,9 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         val amounts = count("SELECT COUNT(*) FROM transactions WHERE amount_cent<=0")
         val directions = count(
             """SELECT COUNT(*) FROM transactions
-               WHERE (flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT')
+               WHERE (flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT','LOAN_REPAYMENT')
                       AND direction_text LIKE '%收入%')
-                  OR (flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY')
+                  OR (flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY','LOAN_DISBURSEMENT')
                       AND direction_text LIKE '%支出%')"""
         )
         val repeated = count(
@@ -831,6 +992,21 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 JOIN transactions e ON e.id=l.expense_id
                 GROUP BY l.expense_id HAVING SUM(l.amount_cent)>MAX(e.amount_cent))"""
         )
+        val invalidLoanDetails = count(
+            """
+            SELECT COUNT(*) FROM loan_repayment_details d
+            LEFT JOIN transactions t ON t.id=d.transaction_id
+            WHERE t.id IS NULL OR t.flow_type <> 'LOAN_REPAYMENT'
+               OR d.principal_cent+d.interest_cent+d.fee_cent <> t.amount_cent
+            """.trimIndent()
+        )
+        val unallocatedLoans = count(
+            """
+            SELECT COUNT(*) FROM transactions t
+            LEFT JOIN loan_repayment_details d ON d.transaction_id=t.id
+            WHERE t.flow_type='LOAN_REPAYMENT' AND d.transaction_id IS NULL
+            """.trimIndent()
+        )
         val summary = summary(month, platform)
         val categorySum = categoryTotals(month, platform, 10000).sumOf { it.amountCent }
         val good = runCatching {
@@ -841,7 +1017,9 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             nonPositiveAmounts=amounts, directionMismatches=directions,
             duplicatePlatformOrderIds=repeated, brokenLinks=broken,
             expenseDifferenceCent=summary.expenseCent-categorySum,
-            databaseIntegrityOk=good
+            databaseIntegrityOk=good,
+            loanBreakdownInvalid=invalidLoanDetails,
+            loanUnallocatedCount=unallocatedLoans
         )
     }
 
@@ -853,6 +1031,9 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             arrayOf(id.toString(), id.toString())
         ).use { it.moveToFirst() }
         require(!linked) { "这笔流水已有退款或 AA 关联，请先撤销关联再修改性质" }
+        if (flowType != FlowType.LOAN_REPAYMENT) {
+            clearLoanDetail(id)
+        }
         writableDatabase.update(
             "transactions",
             ContentValues().apply {
@@ -937,6 +1118,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 5
+        private const val DB_VERSION = 6
     }
 }

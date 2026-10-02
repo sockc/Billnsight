@@ -35,7 +35,7 @@ fun TransactionNatureDialog(
 ) {
     val incoming = transaction.directionText.contains("收入") ||
         transaction.flowType in setOf(
-            FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY,
+            FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.LOAN_RECOVERY, FlowType.LOAN_DISBURSEMENT, FlowType.LOAN_DISBURSEMENT,
             FlowType.BUSINESS_INCOME, FlowType.REFUND
         )
     val options = if (incoming) listOf(
@@ -43,7 +43,7 @@ fun TransactionNatureDialog(
         FlowType.BUSINESS_INCOME, FlowType.REFUND, FlowType.TRANSFER, FlowType.IGNORE
     ) else listOf(
         FlowType.EXPENSE, FlowType.GIFT_EXPENSE, FlowType.LOAN_OUT,
-        FlowType.BUSINESS_EXPENSE, FlowType.CREDIT_REPAYMENT, FlowType.TRANSFER, FlowType.IGNORE
+        FlowType.BUSINESS_EXPENSE, FlowType.CREDIT_REPAYMENT, FlowType.LOAN_REPAYMENT, FlowType.TRANSFER, FlowType.IGNORE
     )
     var nature by remember(transaction.id) {
         mutableStateOf<FlowType?>(transaction.flowType.takeUnless { it == FlowType.PENDING })
@@ -97,6 +97,8 @@ fun TransactionNatureDialog(
                         FlowType.LOAN_RECOVERY -> "借款收回"
                         FlowType.TRANSFER -> "资金流转"
                         FlowType.CREDIT_REPAYMENT -> "信用卡还款"
+                        FlowType.LOAN_REPAYMENT -> "贷款还款"
+                        FlowType.LOAN_DISBURSEMENT -> "贷款到账"
                         FlowType.INCOME -> "收入"
                         FlowType.REFUND -> "退款"
                         FlowType.IGNORE -> "忽略"
