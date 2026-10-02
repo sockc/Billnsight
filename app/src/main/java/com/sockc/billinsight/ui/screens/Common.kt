@@ -156,6 +156,41 @@ fun SectionHeader(title: String, detail: String? = null, trailing: @Composable (
 }
 
 @Composable
+fun PageTitleWithMonth(
+    title: String,subtitle: String,month: YearMonth,
+    onPrevious: () -> Unit,onNext: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(start=20.dp,end=14.dp,top=16.dp,bottom=6.dp),
+        horizontalArrangement=Arrangement.spacedBy(8.dp),
+        verticalAlignment=Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)) {
+            Text(title,style=MaterialTheme.typography.headlineSmall,
+                fontWeight=FontWeight.Bold,maxLines=1)
+            Text(subtitle,style=MaterialTheme.typography.labelSmall,
+                color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,
+                overflow=TextOverflow.Ellipsis)
+        }
+        Surface(color=MaterialTheme.colorScheme.surface,
+            shape=RoundedCornerShape(13.dp),
+            border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) {
+            Row(Modifier.padding(horizontal=2.dp),
+                verticalAlignment=Alignment.CenterVertically) {
+                TextButton(onClick=onPrevious,
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=3.dp)
+                ){Text("‹")}
+                Text("${month.year}/${month.monthValue}",
+                    style=MaterialTheme.typography.labelMedium)
+                TextButton(onClick=onNext,
+                    contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=3.dp)
+                ){Text("›")}
+            }
+        }
+    }
+}
+
+@Composable
 fun MonthHeader(month: YearMonth, onPrevious: () -> Unit, onNext: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=2.dp),
