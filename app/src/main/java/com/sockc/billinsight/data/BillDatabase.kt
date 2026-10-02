@@ -879,7 +879,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
         when (flowFilter) {
             "EXPENSE" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT','LOAN_REPAYMENT')"
-            "CONSUMPTION" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE')"
+            "CONSUMPTION" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE') AND NOT EXISTS(SELECT 1 FROM finance_installment_plans fp WHERE fp.origin_transaction_id=transactions.id AND fp.kind='ADVANCE')"
             "REPAYMENT" -> where += "flow_type IN ('CREDIT_REPAYMENT','LOAN_REPAYMENT')"
             "OUTFLOW" -> where += """(flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT','LOAN_REPAYMENT') AND
                 (flow_type NOT IN ('EXPENSE','GIFT_EXPENSE') OR
@@ -887,7 +887,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             "INCOME" -> where += "flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY','LOAN_DISBURSEMENT','REFUND')"
             "RECEIPTS" -> where += """flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME')
                 AND NOT EXISTS(SELECT 1 FROM transaction_links l
-                               WHERE l.receipt_id=transactions.id)"""
+                               WHERE l.receipt_id=transactions.id) AND NOT EXISTS(SELECT 1 FROM finance_installment_links fl JOIN finance_installment_plans fp ON fp.id=fl.plan_id WHERE fl.transaction_id=transactions.id AND fl.role='RECOVERY' AND fp.kind='ADVANCE')"""
             "OTHER" -> where += "flow_type IN ('TRANSFER','PENDING','IGNORE')"
         }
         if (query.isNotBlank()) {
@@ -1388,7 +1388,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
               COALESCE(SUM(CASE WHEN flow_type IN ('EXPENSE','GIFT_EXPENSE') THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME')
                   AND NOT EXISTS(SELECT 1 FROM transaction_links l
-                                 WHERE l.receipt_id=transactions.id)
+                                 WHERE l.receipt_id=transactions.id) AND NOT EXISTS(SELECT 1 FROM finance_installment_links fl JOIN finance_installment_plans fp ON fp.id=fl.plan_id WHERE fl.transaction_id=transactions.id AND fl.role='RECOVERY' AND fp.kind='ADVANCE')
                 THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='REFUND' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='TRANSFER' THEN amount_cent ELSE 0 END), 0),
@@ -1433,7 +1433,19 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     platform?.let { add(it.name) }
                 }.toTypedArray()
             ).use { x -> x.moveToFirst(); x.getLong(0) }
+            val entrusted=readableDatabase.rawQuery(
+                """SELECT COALESCE(SUM(t.amount_cent),0)
+                   FROM finance_installment_plans p
+                   JOIN transactions t ON t.id=p.origin_transaction_id
+                   WHERE p.kind='ADVANCE' AND t.flow_type='EXPENSE'
+                     AND t.occurred_at>=? AND t.occurred_at<?""" +
+                     if(platform==null) "" else " AND t.platform=?",
+                mutableListOf(start.toString(),end.toString()).apply {
+                    platform?.let {add(it.name)}
+                }.toTypedArray()
+            ).use {x->x.moveToFirst();x.getLong(0)}
             return DashboardSummary(
+                entrustedOriginExpenseCent=entrusted,
                 loanRepaymentCent = loan[0],
                 loanRepaymentCount = loan[1].toInt(),
                 loanDisbursementCent = disbursed,
@@ -1484,7 +1496,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             """SELECT
                 COALESCE(SUM(CASE WHEN t.flow_type IN ('EXPENSE','GIFT_EXPENSE') THEN t.amount_cent ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN t.flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME')
-                    AND NOT EXISTS(SELECT 1 FROM transaction_links x WHERE x.receipt_id=t.id)
+                    AND NOT EXISTS(SELECT 1 FROM transaction_links x WHERE x.receipt_id=t.id) AND NOT EXISTS(SELECT 1 FROM finance_installment_links fl JOIN finance_installment_plans fp ON fp.id=fl.plan_id WHERE fl.transaction_id=t.id AND fl.role='RECOVERY' AND fp.kind='ADVANCE')
                     THEN t.amount_cent ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN t.flow_type='CREDIT_REPAYMENT' THEN t.amount_cent ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN t.flow_type='CREDIT_REPAYMENT' THEN 1 ELSE 0 END),0),
@@ -1504,6 +1516,14 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         ).use { c ->
             if (c.moveToFirst()) for (i in totals.indices) totals[i]=c.getLong(i)
         }
+        val entrusted=readableDatabase.rawQuery(
+            """SELECT COALESCE(SUM(t.amount_cent),0)
+               FROM finance_installment_plans p
+               JOIN transactions t ON t.id=p.origin_transaction_id
+               WHERE p.kind='ADVANCE' AND t.flow_type='EXPENSE'
+                 AND t.occurred_at>=? AND t.occurred_at<?$clause""",
+            args()
+        ).use {c->c.moveToFirst();c.getLong(0)}
         val recovery=LongArray(2)
         readableDatabase.rawQuery(
             """SELECT l.kind,COALESCE(SUM(l.amount_cent),0)
@@ -1550,7 +1570,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             loanInterestCent=fees[1],
             loanFeeCent=fees[2],
             loanUnallocatedCent=(totals[4]-fees.sum()).coerceAtLeast(0),
-            creditFundedExpenseCent=totals[12]
+            creditFundedExpenseCent=totals[12],
+            entrustedOriginExpenseCent=entrusted
         )
     }
 
@@ -1581,7 +1602,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 COUNT(*)
                FROM transactions
                WHERE occurred_at>=? AND occurred_at<?
-                 AND flow_type IN ('EXPENSE','GIFT_EXPENSE')$clause
+                 AND flow_type IN ('EXPENSE','GIFT_EXPENSE')$clause AND NOT EXISTS(SELECT 1 FROM finance_installment_plans fp WHERE fp.origin_transaction_id=transactions.id AND fp.kind='ADVANCE')
                GROUP BY category
                HAVING SUM(amount_cent-COALESCE(
                     (SELECT SUM(l.amount_cent) FROM transaction_links l
@@ -1617,7 +1638,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                       (SELECT SUM(l.amount_cent) FROM transaction_links l
                        WHERE l.expense_id=transactions.id),0)), COUNT(*)
             FROM transactions
-            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type IN ('EXPENSE','GIFT_EXPENSE')$platformClause
+            WHERE occurred_at >= ? AND occurred_at < ? AND flow_type IN ('EXPENSE','GIFT_EXPENSE')$platformClause AND NOT EXISTS(SELECT 1 FROM finance_installment_plans fp WHERE fp.origin_transaction_id=transactions.id AND fp.kind='ADVANCE')
             GROUP BY category
             HAVING SUM(amount_cent - COALESCE(
                       (SELECT SUM(l.amount_cent) FROM transaction_links l
@@ -1649,7 +1670,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         limit: Int = 20,
     ): List<MerchantTotal> {
         val (start, end) = monthRange(month)
-        val conditions = mutableListOf("occurred_at >= ?", "occurred_at < ?", "flow_type IN ('EXPENSE','GIFT_EXPENSE')")
+        val conditions = mutableListOf("occurred_at >= ?", "occurred_at < ?", "flow_type IN ('EXPENSE','GIFT_EXPENSE')", "AND NOT EXISTS(SELECT 1 FROM finance_installment_plans fp WHERE fp.origin_transaction_id=transactions.id AND fp.kind='ADVANCE')")
         val args = mutableListOf(start.toString(), end.toString())
         platform?.let {
             conditions += "platform=?"
