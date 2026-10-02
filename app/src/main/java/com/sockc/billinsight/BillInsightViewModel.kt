@@ -30,6 +30,7 @@ import com.sockc.billinsight.model.LinkKind
 import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
 import com.sockc.billinsight.model.ProductGroup
+import com.sockc.billinsight.model.ReportPeriod
 import com.sockc.billinsight.model.PlatformCategoryRule
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.RecurringExpense
@@ -93,15 +94,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         val customStart=homeCustomStart
         val customEnd=homeCustomEnd
         val now=LocalDate.now()
-        val homeDates=when(homeKey) {
-            "ALL_HISTORY" -> LocalDate.of(1900,1,1) to LocalDate.of(2100,12,31)
-            "LAST_7" -> now.minusDays(6) to now
-            "LAST_MONTH" -> YearMonth.from(now).minusMonths(1).atDay(1) to YearMonth.from(now).minusMonths(1).atEndOfMonth()
-            "YEAR" -> LocalDate.of(now.year,1,1) to now
-            "LAST_YEAR" -> LocalDate.of(now.year-1,1,1) to LocalDate.of(now.year-1,12,31)
-            "CUSTOM" -> (customStart ?: month.atDay(1)) to (customEnd ?: month.atEndOfMonth())
-            else -> month.atDay(1) to month.atEndOfMonth()
-        }
+        val homeDates=ReportPeriod.resolve(homeKey,month,customStart,customEnd,now)
         val homeStartMillis=homeDates.first.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val homeEndMillis=homeDates.second.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         viewModelScope.launch {
