@@ -740,6 +740,13 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     c.getString(2)=="EXPENSE") { "只能关联尚未关联的手动扫码消费" }
                 Triple(c.getLong(0),c.getLong(1),c.getString(3))
             }
+            val existingRefund=db.rawQuery(
+                "SELECT 1 FROM transaction_links WHERE expense_id=? OR receipt_id=? LIMIT 1",
+                arrayOf(manualId.toString(),manualId.toString())
+            ).use { it.moveToFirst() }
+            require(!existingRefund) {
+                "该手动消费已关联退款或分摊，请先撤销原关联再与正式账单去重"
+            }
             val target=db.rawQuery(
                 "SELECT amount_cent,occurred_at,flow_type,platform,trade_type,description,direction_text "+
                     "FROM transactions WHERE id=?",arrayOf(importedId.toString())
@@ -797,6 +804,11 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             arrayOf(id.toString())
         ).use { it.moveToFirst() }
         require(!linked) { "请先取消原账单关联" }
+        val linkedRecovery=readableDatabase.rawQuery(
+            "SELECT 1 FROM transaction_links WHERE expense_id=? OR receipt_id=? LIMIT 1",
+            arrayOf(id.toString(),id.toString())
+        ).use { it.moveToFirst() }
+        require(!linkedRecovery) { "请先撤销退款或 AA 关联再删除" }
         require(writableDatabase.delete("transactions",
             "id=? AND source_file='手动记账'",arrayOf(id.toString()))==1) {
             "手动记录不存在"
@@ -1410,6 +1422,11 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     }
 
     fun updateCategory(id: Long, merchant: String, category: String, rememberMerchant: Boolean) {
+        val scanLinked=readableDatabase.rawQuery(
+            "SELECT 1 FROM manual_scan_links WHERE manual_id=? LIMIT 1",
+            arrayOf(id.toString())
+        ).use { it.moveToFirst() }
+        require(!scanLinked) { "手动记录已关联正式账单，请先取消关联后修改分类" }
         writableDatabase.beginTransaction()
         try {
             writableDatabase.update(

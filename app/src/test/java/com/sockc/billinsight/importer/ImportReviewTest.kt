@@ -40,4 +40,26 @@ class ImportReviewTest {
         assertFalse(preview.canCommit)
         assertEquals(1,preview.invalidTimeCount)
     }
+    @Test fun qrExpenseAndUnnamedMerchantAppearInPreview() {
+        val generic=row("qr-generic").copy(
+            counterparty="二维码付款",tradeType="二维码付款",
+            description="扫码付款",category="其他"
+        )
+        val friend=row("qr-friend").copy(
+            counterparty="张三",tradeType="扫码支付",description="早餐",
+            category="餐饮"
+        )
+        val ordinary=row("transfer").copy(
+            flowType=FlowType.PENDING,tradeType="转账",
+            counterparty="李四",description="转账"
+        )
+        val preview=ImportReview.preview(
+            BillImporter.ParsedBill(
+                "wechat.csv",Platform.WECHAT,listOf(generic,friend,ordinary)
+            ),emptySet()
+        )
+        assertEquals(2,preview.qrExpenseCount)
+        assertEquals(1,preview.qrMerchantReviewCount)
+        assertEquals(3,preview.newCount)
+    }
 }

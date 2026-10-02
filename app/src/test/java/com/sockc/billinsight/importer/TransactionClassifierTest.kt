@@ -19,7 +19,7 @@ class TransactionClassifierTest {
     }
 
     @Test
-    fun foodMerchantIsFood() {
+    fun coffeeMerchantUsesNewDrinksCategory() {
         val result = TransactionClassifier.classify(
             direction = "支出",
             type = "商户消费",
@@ -29,7 +29,7 @@ class TransactionClassifierTest {
             merchantRules = emptyMap(),
         )
         assertEquals(FlowType.EXPENSE, result.flowType)
-        assertEquals("餐饮", result.category)
+        assertEquals("饮品", result.category)
     }
 
     @Test
@@ -177,5 +177,13 @@ class TransactionClassifierTest {
             "支出", "贷款还款", "中国银行", "每月房贷还款", "成功", emptyMap()
         )
         assertEquals(FlowType.LOAN_REPAYMENT, actual.flowType)
+    }
+    @Test fun genericQrPlaceholderDoesNotRememberOtherPeopleAsSameMerchant() {
+        val actual = TransactionClassifier.classify(
+            "支出","二维码付款","二维码付款","扫码付款","成功",
+            mapOf("二维码付款" to "餐饮")
+        )
+        assertEquals(FlowType.EXPENSE,actual.flowType)
+        assertEquals("其他",actual.category)
     }
 }
