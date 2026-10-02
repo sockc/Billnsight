@@ -106,7 +106,7 @@ fun SettingsScreen(
             }
         }
         item {
-            Text("BillInsight V0.2.1 · 本地优先 · 自动归类",
+            Text("BillInsight V0.2.2 · 本地优先 · 自动归类",
                 modifier=Modifier.fillMaxWidth().padding(vertical=19.dp),
                 textAlign=androidx.compose.ui.text.style.TextAlign.Center,
                 style=MaterialTheme.typography.labelSmall,
