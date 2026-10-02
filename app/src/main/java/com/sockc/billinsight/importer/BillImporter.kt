@@ -170,6 +170,7 @@ class BillImporter(
             counterparty = merchant,
             description = description.ifBlank { type },
             directionText = direction,
+            tradeType = type,
             amountCent = amountCent,
             flowType = classification.flowType,
             category = classification.category,

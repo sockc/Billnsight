@@ -42,23 +42,22 @@ object TransactionClassifier {
                 .any { kind.contains(it) }) {
             return Classification(FlowType.TRANSFER, "资金流转")
         }
-        // Do not guess the purpose of a payment to another person or a personal QR code.
-        if (listOf("转账", "二维码收款", "收钱码", "面对面收款", "个人收款码")
-                .any { kind.contains(it) }) {
+        // Explicit QR receipts/payments have a default direction. The user can still
+        // change their nature per transaction (e.g. business proceeds or repayment).
+        val qrReceipt = listOf("二维码收款", "收钱码", "面对面收款", "个人收款码", "扫码收款", "收款码收款")
+            .any { kind.contains(it) }
+        val qrPayment = listOf("二维码付款", "扫码付款", "扫一扫付款", "付款码付款", "扫码支付")
+            .any { kind.contains(it) }
+        if (qrReceipt && incoming) return Classification(FlowType.INCOME, "收入")
+        if (qrPayment && outgoing) {
+            val category = merchantRules[merchant.trim()] ?: categoryFor(all)
+            return Classification(FlowType.EXPENSE, category)
+        }
+        if (qrReceipt || qrPayment) {
             return Classification(FlowType.PENDING, "待确认")
         }
-        if (listOf("二维码付款", "扫码付款", "扫一扫付款").any { kind.contains(it) } &&
-            merchant.trim().isBlank()
-        ) {
+        if (kind.contains("转账")) {
             return Classification(FlowType.PENDING, "待确认")
-        }
-        if (kind.contains("二维码付款") || kind.contains("扫码付款")) {
-            val knownCategory = merchantRules[merchant.trim()]
-            return if (outgoing && knownCategory != null) {
-                Classification(FlowType.EXPENSE, knownCategory)
-            } else {
-                Classification(FlowType.PENDING, "待确认")
-            }
         }
 
         val flow = when {

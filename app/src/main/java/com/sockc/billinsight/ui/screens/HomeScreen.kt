@@ -14,12 +14,18 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.BillUiState
 import com.sockc.billinsight.model.Platform
+import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.util.toYuanText
 import kotlin.math.abs
 
@@ -36,6 +42,19 @@ fun HomeScreen(
     val previous = state.previousSummary.expenseCent
     val delta = current - previous
     val percent = if (previous > 0) delta * 100.0 / previous else null
+    var expandedSummary by remember(state.month, state.platformFilter) { mutableStateOf<String?>(null) }
+    val allIncome = state.monthlyTransactions.filter { tx ->
+        tx.flowType in setOf(
+            FlowType.INCOME, FlowType.GIFT_INCOME, FlowType.BUSINESS_INCOME,
+            FlowType.LOAN_RECOVERY, FlowType.REFUND
+        ) || (tx.directionText.contains("收入") && tx.flowType == FlowType.TRANSFER)
+    }
+    val allExpense = state.monthlyTransactions.filter { tx ->
+        tx.flowType in setOf(
+            FlowType.EXPENSE, FlowType.GIFT_EXPENSE, FlowType.BUSINESS_EXPENSE,
+            FlowType.LOAN_OUT
+        ) || (tx.directionText.contains("支出") && tx.flowType == FlowType.TRANSFER)
+    }
 
     LazyColumn(Modifier.fillMaxSize()) {
         item { PageTitle("账单洞察", "不要求天天记账，导入账单后直接看钱去了哪里。") }
@@ -70,6 +89,37 @@ fun HomeScreen(
                         SummaryMini("流水", "${state.summary.transactionCount} 笔")
                     }
                 }
+            }
+        }
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(onClick = {
+                    expandedSummary = if (expandedSummary == "expense") null else "expense"
+                }) { Text(if (expandedSummary == "expense") "收起全部支出 ▲" else "展开全部支出 ▼") }
+                TextButton(onClick = {
+                    expandedSummary = if (expandedSummary == "income") null else "income"
+                }) { Text(if (expandedSummary == "income") "收起全部收入 ▲" else "展开全部收入 ▼") }
+            }
+        }
+        if (expandedSummary != null) {
+            item {
+                Text(
+                    if (expandedSummary == "expense")
+                        "本月全部支出流水（包含转账和经营支出，各自统计口径不变）"
+                    else
+                        "本月全部收入流水（包含红包、退款和经营收款，各自统计口径不变）",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+            }
+            val entries = if (expandedSummary == "expense") allExpense else allIncome
+            if (entries.isEmpty()) {
+                item { Text("本月暂无此类流水", modifier = Modifier.padding(20.dp)) }
+            } else {
+                items(entries, key = { "summary_${it.id}" }) { TransactionCard(it) }
             }
         }
         item {

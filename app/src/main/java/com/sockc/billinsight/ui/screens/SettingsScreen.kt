@@ -4,9 +4,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -14,43 +16,61 @@ import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.BillUiState
 
 @Composable
-fun SettingsScreen(state: BillUiState, onImport: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        PageTitle("我的", "V0.1.4 · 本地优先")
-        Button(onClick = onImport, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Text("导入账单")
-        }
-        Card(Modifier.fillMaxWidth().padding(16.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("本地数据", style = MaterialTheme.typography.titleMedium)
-                Text("已保存 ${state.totalStored} 笔流水")
-                Text("当前不需要账号、不上传服务器。", style = MaterialTheme.typography.bodySmall)
+fun SettingsScreen(
+    state: BillUiState,
+    onImport: () -> Unit,
+    onExportBackup: () -> Unit,
+    onRestoreBackup: () -> Unit,
+) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        item { PageTitle("我的", "V0.1.5 · 本地优先") }
+        item {
+            Button(onClick = onImport, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text("导入微信 / 支付宝账单")
             }
         }
-        Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("V0.1.4 新增", style = MaterialTheme.typography.titleMedium)
-                Text("• 个人转账 / 二维码收付款识别")
-                Text("• 待确认交易队列和手动调整交易性质")
-                Text("• 红包收入、支出独立统计")
-                Text("• 非破坏性升级，保留既有账单")
-                Text("• 分类固定颜色")
-                Text("• 微信 / 支付宝来源 Badge 与筛选")
-                Text("• 本月 vs 上月消费变化")
-                Text("• 分类 → 商户二级下钻")
-                Text("• 疑似固定支出识别")
-                Text("• 小额高频 ¥20 / ¥50 / ¥100")
-                Text("• 月度消费日历")
+        item {
+            Card(Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("本地账本", style = MaterialTheme.typography.titleMedium)
+                    Text("已保存 ${state.totalStored} 笔流水")
+                    Text("无需登录，账单不上传服务器。", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
-        Card(Modifier.fillMaxWidth().padding(16.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("账单格式", style = MaterialTheme.typography.titleMedium)
-                Text("• 微信 XLSX")
-                Text("• 支付宝 CSV / XLSX")
-                Text("• ZIP 内 XLSX / CSV / TXT")
-                Text("• 加密 ZIP")
-                Text("• 旧版 XLS 暂不支持")
+        item {
+            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("加密备份与恢复", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "使用 AES-256 密码加密的 .bia 文件，保存在你选择的位置；本地备份密码不会上传或保存在应用中。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = onExportBackup, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                        Text("导出加密账本备份")
+                    }
+                    OutlinedButton(onClick = onRestoreBackup, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                        Text("从加密备份恢复")
+                    }
+                    Text(
+                        "恢复会覆盖当前账本。建议恢复前先导出当前备份，并妥善保管密码；密码丢失无法解密。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("V0.1.5 新增", style = MaterialTheme.typography.titleMedium)
+                    Text("• 二维码付款直接计个人消费、收款直接计个人收入")
+                    Text("• 所有收入支出可原位置展开全部明细")
+                    Text("• 分类 → 商户 → 商品 → 每笔消费")
+                    Text("• 全历史交易搜索、来源及收支筛选")
+                    Text("• AES-256 加密 .bia 账本备份与恢复")
+                    Text("• 保留原有数据及个人手工修改")
+                }
             }
         }
     }

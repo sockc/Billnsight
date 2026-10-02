@@ -26,6 +26,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import java.time.LocalDate
 import com.sockc.billinsight.BillInsightViewModel
 import com.sockc.billinsight.ui.screens.AnalysisScreen
 import com.sockc.billinsight.ui.screens.DiscoverScreen
@@ -52,6 +54,24 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
     }
 
     var zipPassword by remember { mutableStateOf("") }
+    var backupAction by remember { mutableStateOf<String?>(null) }
+    var backupDraft by remember { mutableStateOf("") }
+    var backupConfirm by remember { mutableStateOf("") }
+    var backupPassword by remember { mutableStateOf("") }
+    val backupSaver = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        uri?.let { viewModel.exportEncryptedBackup(it, backupPassword) }
+        backupPassword = ""
+    }
+    val backupReader = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.restoreEncryptedBackup(it, backupPassword) }
+        backupPassword = ""
+    }
+    val startBackup = { backupAction = "export"; backupDraft = ""; backupConfirm = "" }
+    val startRestore = { backupAction = "restore"; backupDraft = ""; backupConfirm = "" }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::importBill)
     }
@@ -72,6 +92,60 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
             snackbar.showSnackbar(it)
             viewModel.clearMessage()
         }
+    }
+
+    if (backupAction != null) {
+        val exporting = backupAction == "export"
+        AlertDialog(
+            onDismissRequest = { backupAction = null; backupDraft = ""; backupConfirm = "" },
+            title = { Text(if (exporting) "导出加密备份" else "从加密备份恢复") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text(
+                        if (exporting) "设置至少 8 位的备份密码。忘记密码将无法恢复。"
+                        else "恢复将覆盖当前账本，请先确认已另行备份现有数据。",
+                    )
+                    OutlinedTextField(
+                        value = backupDraft, onValueChange = { backupDraft = it },
+                        label = { Text("备份密码（至少 8 位）") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                    )
+                    if (exporting) {
+                        OutlinedTextField(
+                            value = backupConfirm, onValueChange = { backupConfirm = it },
+                            label = { Text("再次输入密码") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                        )
+                        if (backupConfirm.isNotBlank() && backupDraft != backupConfirm) {
+                            Text("两次密码不一致")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = backupDraft.length >= 8 && (!exporting || backupDraft == backupConfirm),
+                    onClick = {
+                        backupPassword = backupDraft
+                        backupDraft = ""
+                        backupConfirm = ""
+                        backupAction = null
+                        if (exporting) {
+                            backupSaver.launch("BillInsight-${LocalDate.now()}-encrypted.bia")
+                        } else {
+                            backupReader.launch(arrayOf("*/*"))
+                        }
+                    }
+                ) { Text(if (exporting) "选择保存位置" else "选择 .bia 备份") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    backupAction = null; backupDraft = ""; backupConfirm = ""
+                }) { Text("取消") }
+            },
+        )
     }
 
     if (state.needsZipPassword) {
@@ -130,7 +204,13 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onReviewPending = { reviewMode = true; selected = 1 },
                 )
                 1 -> TransactionsScreen(
-                    transactions = state.transactions,
+                    transactions = state.searchResults,
+                    searchQuery = state.searchQuery,
+                    onSearchQueryChange = viewModel::setSearchQuery,
+                    searchFlowFilter = state.searchFlowFilter,
+                    onSearchFlowChange = viewModel::setSearchFlowFilter,
+                    searchLimit = state.searchLimit,
+                    onLoadMore = viewModel::loadMoreSearch,
                     pendingTransactions = state.pendingTransactions,
                     pendingCount = state.pendingCount,
                     reviewMode = reviewMode,
@@ -145,7 +225,12 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onPlatformChange = viewModel::setPlatformFilter,
                     onSmallThresholdChange = viewModel::setSmallThreshold,
                 )
-                else -> SettingsScreen(state, openImport)
+                else -> SettingsScreen(
+                    state = state,
+                    onImport = openImport,
+                    onExportBackup = startBackup,
+                    onRestoreBackup = startRestore,
+                )
             }
 
             if (state.isLoading) {

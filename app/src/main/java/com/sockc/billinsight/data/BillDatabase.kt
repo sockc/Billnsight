@@ -29,6 +29,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 counterparty TEXT NOT NULL,
                 description TEXT NOT NULL,
                 direction_text TEXT NOT NULL,
+                trade_type TEXT NOT NULL DEFAULT '',
                 amount_cent INTEGER NOT NULL,
                 flow_type TEXT NOT NULL,
                 category TEXT NOT NULL,
@@ -82,6 +83,27 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 """.trimIndent()
             )
         }
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE transactions ADD COLUMN trade_type TEXT NOT NULL DEFAULT ''")
+            // Only upgrade records that are STILL pending. Manually reviewed records
+            // keep their original nature and category.
+            db.execSQL(
+                """
+                UPDATE transactions SET flow_type='INCOME', category='收入'
+                WHERE flow_type='PENDING' AND direction_text LIKE '%收入%'
+                  AND (description LIKE '%二维码收款%' OR description LIKE '%收钱码%'
+                       OR description LIKE '%扫码收款%' OR description LIKE '%面对面收款%')
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                UPDATE transactions SET flow_type='EXPENSE', category='其他'
+                WHERE flow_type='PENDING' AND direction_text LIKE '%支出%'
+                  AND (description LIKE '%二维码付款%' OR description LIKE '%扫码付款%'
+                       OR description LIKE '%扫一扫付款%' OR description LIKE '%扫码支付%')
+            """.trimIndent()
+            )
+        }
     }
 
     fun insertAll(items: List<Transaction>): Pair<Int, Int> {
@@ -96,6 +118,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     put("counterparty", item.counterparty)
                     put("description", item.description)
                     put("direction_text", item.directionText)
+                    put("trade_type", item.tradeType)
                     put("amount_cent", item.amountCent)
                     put("flow_type", item.flowType.name)
                     put("category", item.category)
@@ -108,7 +131,28 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 val id = writableDatabase.insertWithOnConflict(
                     "transactions", null, values, SQLiteDatabase.CONFLICT_IGNORE
                 )
-                if (id == -1L) duplicate++ else inserted++
+                if (id == -1L) {
+                    duplicate++
+                    // Reimporting an original file can recover the QR transaction type
+                    // missing from pre-v0.1.5 databases. Never overwrite manual review.
+                    val qrType = item.tradeType.contains("二维码") ||
+                        item.tradeType.contains("扫码") ||
+                        item.tradeType.contains("收钱码")
+                    if (qrType && item.flowType in setOf(FlowType.EXPENSE, FlowType.INCOME)) {
+                        writableDatabase.update(
+                            "transactions",
+                            ContentValues().apply {
+                                put("flow_type", item.flowType.name)
+                                put("category", item.category)
+                                put("trade_type", item.tradeType)
+                            },
+                            "fingerprint=? AND flow_type='PENDING'",
+                            arrayOf(item.fingerprint)
+                        )
+                    }
+                } else {
+                    inserted++
+                }
             }
             writableDatabase.setTransactionSuccessful()
         } finally {
@@ -122,6 +166,57 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         val args = platform?.let { arrayOf(it.name) }
         readableDatabase.query(
             "transactions", null, where, args, null, null, "occurred_at DESC", limit.toString()
+        ).use { cursor ->
+            return buildList {
+                while (cursor.moveToNext()) add(cursor.toTransaction())
+            }
+        }
+    }
+
+    /** Full selected-month history, not limited to the 500 newest entries. */
+    fun monthTransactions(month: YearMonth, platform: Platform? = null): List<Transaction> {
+        val (start, end) = monthRange(month)
+        val selection = "occurred_at >= ? AND occurred_at < ?" +
+            if (platform == null) "" else " AND platform=?"
+        val args = mutableListOf(start.toString(), end.toString())
+        platform?.let { args += it.name }
+        readableDatabase.query(
+            "transactions", null, selection, args.toTypedArray(), null, null,
+            "occurred_at DESC"
+        ).use { cursor ->
+            return buildList {
+                while (cursor.moveToNext()) add(cursor.toTransaction())
+            }
+        }
+    }
+
+    /** Safe bound-parameter search over ALL historical income and expenses. */
+    fun searchTransactions(
+        query: String,
+        platform: Platform? = null,
+        flowFilter: String = "ALL",
+        limit: Int = 200,
+    ): List<Transaction> {
+        val where = mutableListOf<String>()
+        val args = mutableListOf<String>()
+        platform?.let {
+            where += "platform=?"
+            args += it.name
+        }
+        when (flowFilter) {
+            "EXPENSE" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT')"
+            "INCOME" -> where += "flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY','REFUND')"
+            "OTHER" -> where += "flow_type IN ('TRANSFER','PENDING','IGNORE')"
+        }
+        if (query.isNotBlank()) {
+            val escaped = query.trim().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            where += "(counterparty LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR trade_type LIKE ? ESCAPE '\\' OR category LIKE ? ESCAPE '\\' OR transaction_id LIKE ? ESCAPE '\\' OR merchant_order_id LIKE ? ESCAPE '\\')"
+            repeat(6) { args += "%$escaped%" }
+        }
+        readableDatabase.query(
+            "transactions", null, where.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
+            args.takeIf { it.isNotEmpty() }?.toTypedArray(), null, null,
+            "occurred_at DESC, id DESC", limit.coerceIn(1, 10000).toString()
         ).use { cursor ->
             return buildList {
                 while (cursor.moveToNext()) add(cursor.toTransaction())
@@ -433,6 +528,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         counterparty = getString(getColumnIndexOrThrow("counterparty")),
         description = getString(getColumnIndexOrThrow("description")),
         directionText = getString(getColumnIndexOrThrow("direction_text")),
+        tradeType = getString(getColumnIndexOrThrow("trade_type")),
         amountCent = getLong(getColumnIndexOrThrow("amount_cent")),
         flowType = runCatching { FlowType.valueOf(getString(getColumnIndexOrThrow("flow_type"))) }.getOrDefault(FlowType.IGNORE),
         category = getString(getColumnIndexOrThrow("category")),
@@ -445,6 +541,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 2
+        private const val DB_VERSION = 3
     }
 }

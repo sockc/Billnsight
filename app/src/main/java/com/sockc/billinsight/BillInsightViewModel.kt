@@ -4,7 +4,9 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.sockc.billinsight.analysis.ProductAnalysis
 import com.sockc.billinsight.data.BillDatabase
+import com.sockc.billinsight.data.BackupManager
 import com.sockc.billinsight.importer.BillImporter
 import com.sockc.billinsight.importer.PasswordRequiredException
 import com.sockc.billinsight.model.CategoryTotal
@@ -13,6 +15,7 @@ import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.ImportResult
 import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.MerchantTotal
+import com.sockc.billinsight.model.ProductGroup
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.RecurringExpense
 import com.sockc.billinsight.model.Transaction
@@ -31,7 +34,9 @@ import java.time.format.DateTimeFormatter
 class BillInsightViewModel(application: Application) : AndroidViewModel(application) {
     private val db = BillDatabase(application)
     private val importer = BillImporter(application, application.contentResolver)
+    private val backupManager = BackupManager(application, db)
     private var pendingImportUri: Uri? = null
+    private var latestRefresh = 0
 
     private val _uiState = MutableStateFlow(BillUiState())
     val uiState: StateFlow<BillUiState> = _uiState.asStateFlow()
@@ -42,14 +47,25 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         month: YearMonth = _uiState.value.month,
         platform: Platform? = _uiState.value.platformFilter,
         smallThresholdYuan: Int = _uiState.value.smallThresholdYuan,
+        searchQuery: String = _uiState.value.searchQuery,
+        searchFlowFilter: String = _uiState.value.searchFlowFilter,
+        searchLimit: Int = _uiState.value.searchLimit,
     ) {
+        val ticket = ++latestRefresh
         viewModelScope.launch {
             val previousMessage = _uiState.value.message
             _uiState.value = _uiState.value.copy(isLoading = true)
             val state = withContext(Dispatchers.IO) {
                 val thresholdCent = smallThresholdYuan * 100L
                 val categories = db.categoryTotals(month, platform)
+                val monthly = db.monthTransactions(month, platform)
                 BillUiState(
+                    searchQuery = searchQuery,
+                    searchFlowFilter = searchFlowFilter,
+                    searchLimit = searchLimit,
+                    searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit),
+                    monthlyTransactions = monthly,
+                    productGroups = ProductAnalysis.groups(monthly),
                     month = month,
                     platformFilter = platform,
                     smallThresholdYuan = smallThresholdYuan,
@@ -76,7 +92,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     message = previousMessage,
                 )
             }
-            _uiState.value = state
+            if (ticket == latestRefresh) _uiState.value = state
         }
     }
 
@@ -163,6 +179,61 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+
+    fun exportEncryptedBackup(uri: Uri, password: String) {
+        if (_uiState.value.isLoading) {
+            _uiState.value = _uiState.value.copy(message = "请先完成当前操作")
+            return
+        }
+        _uiState.value = _uiState.value.copy(isLoading = true, message = null)
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) { backupManager.exportEncrypted(uri, password) }
+            }
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                message = if (outcome.isSuccess) "加密账本备份已保存"
+                    else outcome.exceptionOrNull()?.message ?: "备份失败",
+            )
+        }
+    }
+
+    fun restoreEncryptedBackup(uri: Uri, password: String) {
+        if (_uiState.value.isLoading) {
+            _uiState.value = _uiState.value.copy(message = "请先完成当前操作")
+            return
+        }
+        _uiState.value = _uiState.value.copy(isLoading = true, message = null)
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) { backupManager.restoreEncrypted(uri, password) }
+            }
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                message = if (outcome.isSuccess) "加密账本已恢复，全部统计重新加载"
+                    else outcome.exceptionOrNull()?.message ?: "恢复失败",
+            )
+            if (outcome.isSuccess) refresh()
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        val value = query.take(100)
+        _uiState.value = _uiState.value.copy(searchQuery = value, searchLimit = 200)
+        refresh(searchQuery = value, searchLimit = 200)
+    }
+
+    fun setSearchFlowFilter(flow: String) {
+        if (flow !in setOf("ALL", "EXPENSE", "INCOME", "OTHER")) return
+        _uiState.value = _uiState.value.copy(searchFlowFilter = flow, searchLimit = 200)
+        refresh(searchFlowFilter = flow, searchLimit = 200)
+    }
+
+    fun loadMoreSearch() {
+        val next = (_uiState.value.searchLimit + 200).coerceAtMost(10000)
+        if (next != _uiState.value.searchLimit) refresh(searchLimit = next)
+    }
+
     fun setPlatformFilter(platform: Platform?) {
         if (_uiState.value.platformFilter == platform) return
         refresh(platform = platform)
@@ -199,6 +270,12 @@ data class BillUiState(
     val summary: DashboardSummary = DashboardSummary(),
     val previousSummary: DashboardSummary = DashboardSummary(),
     val transactions: List<Transaction> = emptyList(),
+    val monthlyTransactions: List<Transaction> = emptyList(),
+    val productGroups: List<ProductGroup> = emptyList(),
+    val searchQuery: String = "",
+    val searchFlowFilter: String = "ALL",
+    val searchLimit: Int = 200,
+    val searchResults: List<Transaction> = emptyList(),
     val pendingTransactions: List<Transaction> = emptyList(),
     val pendingCount: Int = 0,
     val categories: List<CategoryTotal> = emptyList(),

@@ -59,9 +59,9 @@ class TransactionClassifierTest {
         assertEquals(FlowType.REFUND, actual.flowType)
     }
 
-    @Test fun unknownQrReceiptNeedsReview() {
+    @Test fun qrReceiptDefaultsToIncome() {
         val actual = TransactionClassifier.classify("收入", "二维码收款", "张三", "收钱码", "已收款", emptyMap())
-        assertEquals(FlowType.PENDING, actual.flowType)
+        assertEquals(FlowType.INCOME, actual.flowType)
     }
 
     @Test fun selfAccountTopUpIsTransfer() {
@@ -69,14 +69,29 @@ class TransactionClassifierTest {
         assertEquals(FlowType.TRANSFER, actual.flowType)
     }
 
-    @Test fun qrPaymentNeedsReviewWithoutKnownMerchantRule() {
+    @Test fun qrPaymentDefaultsToExpenseWithoutKnownMerchantRule() {
         val actual = TransactionClassifier.classify("支出", "二维码付款", "张三", "扫码付款", "支付成功", emptyMap())
-        assertEquals(FlowType.PENDING, actual.flowType)
+        assertEquals(FlowType.EXPENSE, actual.flowType)
+        assertEquals("其他", actual.category)
     }
 
     @Test fun knownMerchantQrPaymentCanUseExplicitRule() {
         val actual = TransactionClassifier.classify("支出", "二维码付款", "XX饭店", "扫码付款", "成功", mapOf("XX饭店" to "餐饮"))
         assertEquals(FlowType.EXPENSE, actual.flowType)
         assertEquals("餐饮", actual.category)
+    }
+    @Test fun unspecifiedTransferStillNeedsReview() {
+        val actual = TransactionClassifier.classify("收入", "转账", "张三", "给你的转账", "已收款", emptyMap())
+        assertEquals(FlowType.PENDING, actual.flowType)
+    }
+
+    @Test fun qrReceiptWithoutDirectionNeedsReview() {
+        val actual = TransactionClassifier.classify("不计收支", "二维码收款", "张三", "二维码收款", "已完成", emptyMap())
+        assertEquals(FlowType.PENDING, actual.flowType)
+    }
+
+    @Test fun userRuleDoesNotOverrideIncomingQrReceipt() {
+        val actual = TransactionClassifier.classify("收入", "收钱码", "XX饭店", "扫码收款", "收款成功", mapOf("XX饭店" to "餐饮"))
+        assertEquals(FlowType.INCOME, actual.flowType)
     }
 }

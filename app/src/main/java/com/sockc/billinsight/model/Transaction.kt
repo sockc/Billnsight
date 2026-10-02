@@ -32,6 +32,7 @@ data class Transaction(
     val counterparty: String,
     val description: String,
     val directionText: String,
+    val tradeType: String = "",
     val amountCent: Long,
     val flowType: FlowType,
     val category: String,
@@ -78,4 +79,13 @@ data class ImportResult(
     val sourceName: String,
     val startAt: Long? = null,
     val endAt: Long? = null,
+)
+
+data class ProductGroup(
+    val merchant: String,
+    val product: String,
+    val amountCent: Long,
+    val count: Int,
+    val transactions: List<Transaction>,
+    val unspecified: Boolean = false,
 )
