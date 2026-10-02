@@ -251,6 +251,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                 "rules" -> RuleCenterScreen(
                     state=state,onBack={detailPage=null},
                     onPreview=viewModel::previewCategoryRule,
+                    onReclassify=viewModel::reclassifyOtherExpenses,
                     onSaveCategory=viewModel::saveCategoryRule,
                     onDeleteCategory=viewModel::deleteCategoryRule,
                     onDeletePlatformCategory=viewModel::deletePlatformCategoryRule,

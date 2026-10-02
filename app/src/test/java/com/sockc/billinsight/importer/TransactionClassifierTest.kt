@@ -5,6 +5,31 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class TransactionClassifierTest {
+    @Test fun phoneTopUpIsRealExpense() {
+        val result = TransactionClassifier.classify(
+            "支出", "手机充值", "中国联合网络通信有限公司",
+            "为185****6680交费50元", "交易成功", emptyMap()
+        )
+        assertEquals(FlowType.EXPENSE, result.flowType)
+        assertEquals("生活缴费", result.category)
+    }
+
+    @Test fun chargingOrderIsNotWalletTopUp() {
+        val result = TransactionClassifier.classify(
+            "支出", "商户消费", "小桔充电", "充电订单", "成功", emptyMap()
+        )
+        assertEquals(FlowType.EXPENSE, result.flowType)
+        assertEquals("车辆", result.category)
+    }
+
+    @Test fun ordinaryQrWithKnownLocalRestaurant() {
+        val result = TransactionClassifier.classify(
+            "支出", "二维码付款", "武汉热干面", "二维码付款", "成功", emptyMap()
+        )
+        assertEquals(FlowType.EXPENSE, result.flowType)
+        assertEquals("餐饮", result.category)
+    }
+
     @Test
     fun personToPersonTransferIsExpense() {
         val result = TransactionClassifier.classify(

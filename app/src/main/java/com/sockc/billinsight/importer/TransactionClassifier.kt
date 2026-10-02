@@ -67,7 +67,13 @@ object TransactionClassifier {
         if (listOf("提现", "提现到银行卡", "转出到银行卡").any { kind.contains(it) }) {
             return Classification(FlowType.TRANSFER, "资金提现")
         }
-        if (listOf("充值", "余额宝", "零钱通", "资金转入", "资金转出")
+        // A mobile top-up, charging order or prepaid service is consumption.
+        // Only explicit wallet/account reloads are internal fund movements.
+        val wallet = "$merchant $type $description".lowercase()
+        val accountRecharge = kind.contains("充值") &&
+            listOf("微信零钱", "支付宝余额", "余额宝", "零钱通", "钱包余额", "银行卡余额")
+                .any { wallet.contains(it) }
+        if (accountRecharge || listOf("余额宝", "零钱通", "资金转入", "资金转出")
                 .any { kind.contains(it) }) {
             return Classification(FlowType.TRANSFER, "资金流转")
         }
@@ -81,8 +87,11 @@ object TransactionClassifier {
         // Transfer wording does not overrule explicit outgoing QR evidence.
         if (qrPayment && outgoing) {
             val rule = merchant.takeUnless(ScanPaymentClassifier::isGenericCounterparty)
-                ?.let { merchantRules[it.trim()] }
-            return Classification(FlowType.EXPENSE, rule ?: categoryFor(all))
+                ?.let { name -> merchantRules.entries.firstOrNull {
+                    MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(name)
+                }?.value }
+            return Classification(FlowType.EXPENSE,
+                rule ?: MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
         }
         if (qrReceipt || kind.contains("二维码付款") || kind.contains("扫码支付")) {
             return Classification(FlowType.PENDING, "待确认")
@@ -107,9 +116,12 @@ object TransactionClassifier {
             return Classification(flow, if (flow == FlowType.INCOME) "收入" else "忽略")
         }
         if (!ScanPaymentClassifier.isGenericCounterparty(merchant)) {
-            merchantRules[merchant.trim()]?.let { return Classification(FlowType.EXPENSE, it) }
+            merchantRules.entries.firstOrNull {
+                MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(merchant)
+            }?.value?.let { return Classification(FlowType.EXPENSE, it) }
         }
-        return Classification(FlowType.EXPENSE, categoryFor(all))
+        return Classification(FlowType.EXPENSE,
+            MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
     }
 
     private fun categoryFor(text: String): String = when {
