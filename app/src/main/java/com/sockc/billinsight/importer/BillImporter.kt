@@ -104,7 +104,7 @@ class BillImporter(
         contextText: String,
     ): ParsedBill {
         val headers = rows[headerIndex].map(::normalizeHeader)
-        val platform = detectPlatform(headers, contextText)
+        val platform = detectPlatform(headers, "$sourceName $contextText")
         val items = rows.drop(headerIndex + 1).mapNotNull { row ->
             parseRow(row, headers, platform, sourceName, merchantRules)
         }
@@ -132,16 +132,16 @@ class BillImporter(
             return row.getOrNull(index)?.trim().orEmpty()
         }
 
-        val time = value("交易时间", "交易创建时间", "付款时间", "创建时间")
-        val merchant = value("交易对方", "对方", "商户名称", "交易商户")
-        val description = value("商品", "商品名称", "商品说明", "交易商品")
-        val direction = value("收/支", "收支", "收支类型")
-        val amountRaw = value("金额(元)", "金额（元）", "金额", "交易金额")
-        val type = value("交易类型", "类型")
-        val payment = value("支付方式", "付款方式", "资金状态")
-        val status = value("当前状态", "交易状态", "状态")
-        val transactionId = value("交易单号", "交易号", "支付宝交易号")
-        val merchantOrderId = value("商户单号", "商家订单号", "商户订单号")
+        val time = value("交易时间", "交易创建时间", "付款时间", "创建时间", "支付时间", "下单时间", "订单时间", "交易日期")
+        val merchant = value("交易对方", "对方", "商户名称", "交易商户", "商家名称", "店铺名称", "收款方")
+        val description = value("商品", "商品名称", "商品说明", "交易商品", "商品信息", "订单名称", "订单内容")
+        val direction = value("收/支", "收支", "收支类型", "资金方向", "交易方向")
+        val amountRaw = value("金额(元)", "金额（元）", "金额", "交易金额", "实付金额", "支付金额", "实收金额")
+        val type = value("交易类型", "类型", "业务类型", "订单类型")
+        val payment = value("支付方式", "付款方式", "支付渠道")
+        val status = value("当前状态", "交易状态", "状态", "订单状态", "支付状态")
+        val transactionId = value("交易单号", "交易号", "支付宝交易号", "支付单号", "流水号")
+        val merchantOrderId = value("商户单号", "商家订单号", "商户订单号", "订单号", "订单编号")
         val amountCent = parseAmountToCent(amountRaw)
 
         if (time.isBlank() && merchant.isBlank() && description.isBlank() && amountCent == 0L) return null
@@ -195,6 +195,12 @@ class BillImporter(
     private fun detectPlatform(headers: List<String>, text: String): Platform {
         val all = (headers.joinToString("|") + text.take(5000)).lowercase()
         return when {
+            (all.contains("京东") || all.contains("jd.com")) &&
+                headers.any { it.contains("订单") || it.contains("交易") } -> Platform.JD
+            (all.contains("抖音") || all.contains("douyin")) &&
+                headers.any { it.contains("订单") || it.contains("交易") } -> Platform.DOUYIN
+            (all.contains("美团") || all.contains("meituan")) &&
+                headers.any { it.contains("订单") || it.contains("交易") } -> Platform.MEITUAN
             all.contains("微信支付") ||
                 all.contains("微信支付账单") ||
                 (all.contains("商户单号") && all.contains("当前状态")) -> Platform.WECHAT
