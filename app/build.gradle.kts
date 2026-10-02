@@ -19,8 +19,8 @@ android {
         applicationId = "com.sockc.billinsight"
         minSdk = 26
         targetSdk = 37
-        versionCode = 20
-        versionName = "0.2.8"
+        versionCode = 21
+        versionName = "0.2.9"
     }
 
     signingConfigs {
