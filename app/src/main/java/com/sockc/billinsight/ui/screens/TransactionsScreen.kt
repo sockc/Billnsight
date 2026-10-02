@@ -184,7 +184,7 @@ fun TransactionsScreen(
                     verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
                     val total=when(searchFlowFilter) {
                         "OUTFLOW" -> state.homeSummary.cashOutflowCent
-                        "CONSUMPTION" -> state.homeSummary.netExpenseCent
+                        "CONSUMPTION" -> state.homeSummary.shoppingConsumptionCent
                         "RECEIPTS" -> state.homeSummary.incomeCent
                         "REPAYMENT" -> state.homeSummary.creditRepaymentCent+state.homeSummary.loanRepaymentCent
                         else -> null
