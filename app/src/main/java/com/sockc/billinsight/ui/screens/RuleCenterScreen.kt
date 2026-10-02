@@ -98,7 +98,7 @@ fun RuleCenterScreen(
             dismissButton={TextButton(onClick={confirmApply=false}){Text("取消")}}
         )
     }
-    editing?.let { kind ->
+    if(!confirmApply) editing?.let { kind ->
         val canApply=state.rulePreviewMerchant==source.trim()
         AlertDialog(
             onDismissRequest={clearForm()},

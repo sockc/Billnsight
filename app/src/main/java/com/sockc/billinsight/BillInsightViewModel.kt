@@ -72,8 +72,12 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             val previousPreview = _uiState.value.importPreview
             val previousReport = _uiState.value.lastImportResult
             val previousAudit = _uiState.value.dataAudit
-            val previousTrendDetails = _uiState.value.trendDetails
-            val previousTrendLabel = _uiState.value.trendSelectionLabel
+            val sameScope=_uiState.value.month==month &&
+                _uiState.value.platformFilter==platform
+            val previousTrendDetails=if(sameScope) _uiState.value.trendDetails
+                else emptyList()
+            val previousTrendLabel=if(sameScope) _uiState.value.trendSelectionLabel
+                else null
             _uiState.value = _uiState.value.copy(isLoading = true)
             val state = withContext(Dispatchers.IO) {
                 synchronized(db) {
@@ -155,7 +159,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         }
         pendingParsedBill=null
         _uiState.value = _uiState.value.copy(
-            isLoading=true,message=null,needsZipPassword=false,importPreview=null
+            isLoading=true,message=null,needsZipPassword=false,
+            importPreview=null,lastImportResult=null
         )
         viewModelScope.launch {
             val outcome=runCatching {

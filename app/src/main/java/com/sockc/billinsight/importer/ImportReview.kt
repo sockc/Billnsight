@@ -7,11 +7,7 @@ import com.sockc.billinsight.model.Transaction
 /** Pure, testable preview. Nothing is persisted until the user confirms. */
 object ImportReview {
     fun preview(parsed: BillImporter.ParsedBill, existing: Set<String>): ImportPreview {
-        val seen=mutableSetOf<String>()
-        val duplicates=parsed.transactions.count {
-            it.fingerprint in existing || !seen.add(it.fingerprint)
-        }
-        // Count all fingerprints only once: existing duplicates must also enter seen.
+        // Count both previously imported fingerprints and duplicates within this file.
         val unique=parsed.transactions.map { it.fingerprint }.toSet()
         val newCount=unique.count { it !in existing }
         return ImportPreview(

@@ -359,42 +359,40 @@ private fun HomeMetricCard(
 
 @Composable
 private fun SevenDayTrend(state:BillUiState) {
-    val today=YearMonth.now()
-    val end=if(state.month==today) java.time.LocalDate.now().dayOfMonth
-            else state.month.lengthOfMonth()
-    val days=(max(1,end-6)..end).toList()
-    val data=state.dailyTotals.associateBy { it.dayOfMonth }
-    val maxSpend=days.maxOfOrNull { data[it]?.amountCent?:0L }?.coerceAtLeast(1L)?:1L
+    // One accounting source for both the dashboard and the dedicated trend page.
+    // Linked refunds/AA reduce the ORIGINAL spending day, not the receipt day.
+    val points=state.trendDays.takeLast(7)
+    val high=points.maxOfOrNull { it.expenseCent }?.coerceAtLeast(1L)?:1L
     Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
         shape=RoundedCornerShape(19.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Row(Modifier.fillMaxWidth().padding(horizontal=10.dp,vertical=17.dp),
             horizontalArrangement=Arrangement.spacedBy(2.dp),
             verticalAlignment=Alignment.Bottom) {
-            days.forEach { day ->
-                val cents=data[day]?.amountCent?:0L
-                val fraction=cents.toFloat()/maxSpend.toFloat()
+            points.forEachIndexed { index,point ->
+                val cents=point.expenseCent
+                val fraction=cents.toFloat()/high.toFloat()
                 Column(Modifier.weight(1f),
                     horizontalAlignment=Alignment.CenterHorizontally,
                     verticalArrangement=Arrangement.spacedBy(6.dp)) {
                     Text(
                         if(cents==0L) "0" else if(cents>=100000L)
                             "${"%.1f".format(Locale.US,cents/100000.0)}k"
-                        else "${cents/100L}",
+                        else (cents/100L).toString(),
                         style=MaterialTheme.typography.labelSmall,
                         color=MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines=1
                     )
                     Box(Modifier.height(70.dp),contentAlignment=Alignment.BottomCenter) {
                         Box(Modifier.width(20.dp)
-                            .height((6+fraction*64).dp)
+                            .height((6f+fraction*64f).dp)
                             .background(
-                                if(day==end) MaterialTheme.colorScheme.primary
+                                if(index==points.lastIndex) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.primary.copy(alpha=0.37f),
                                 RoundedCornerShape(topStart=6.dp,topEnd=6.dp)
                             ))
                     }
-                    Text("${day}日",style=MaterialTheme.typography.labelSmall,
+                    Text(point.label,style=MaterialTheme.typography.labelSmall,
                         color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

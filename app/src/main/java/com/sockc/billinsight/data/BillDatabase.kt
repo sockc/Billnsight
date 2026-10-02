@@ -59,6 +59,9 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         db.execSQL("CREATE INDEX idx_transactions_flow ON transactions(flow_type)")
         db.execSQL("CREATE INDEX idx_transactions_category ON transactions(category)")
         db.execSQL("CREATE INDEX idx_transactions_platform ON transactions(platform)")
+        db.execSQL(
+            "CREATE INDEX idx_transactions_rule ON transactions(counterparty,flow_type,nature_modified)"
+        )
         createLinkAndAliasTables(db)
         createLoanDetailsTable(db)
         createFinanceCenterTables(db)
@@ -163,6 +166,10 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
         if (oldVersion < 8) {
             createFinanceCenterTables(db)
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS idx_transactions_rule " +
+                    "ON transactions(counterparty,flow_type,nature_modified)"
+            )
         }
     }
 
@@ -1142,8 +1149,19 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             arrayOf(id.toString(), id.toString())
         ).use { it.moveToFirst() }
         require(!linked) { "这笔流水已有退款或 AA 关联，请先撤销关联再修改性质" }
-        if (flowType != FlowType.LOAN_REPAYMENT) {
-            clearLoanDetail(id)
+        val linkedManual=readableDatabase.rawQuery(
+            "SELECT 1 FROM manual_credit_repayments WHERE linked_transaction_id=? LIMIT 1",
+            arrayOf(id.toString())
+        ).use { it.moveToFirst() }
+        require(!linkedManual || flowType==FlowType.CREDIT_REPAYMENT) {
+            "该还款已关联手动补录，请先在信用卡管理中取消关联"
+        }
+        val split=readableDatabase.rawQuery(
+            "SELECT 1 FROM loan_repayment_details WHERE transaction_id=? LIMIT 1",
+            arrayOf(id.toString())
+        ).use { it.moveToFirst() }
+        require(!split || flowType==FlowType.LOAN_REPAYMENT) {
+            "已记录本金和利息，请先撤销拆分再修改交易性质"
         }
         writableDatabase.update(
             "transactions",
@@ -1184,9 +1202,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     "transactions",
                     ContentValues().apply {
                         put("category", category)
-                        put("nature_modified", 1)
                     },
-                    "counterparty=? AND flow_type='EXPENSE'",
+                    "counterparty=? AND flow_type='EXPENSE' AND nature_modified=0",
                     arrayOf(merchant.trim())
                 )
             }

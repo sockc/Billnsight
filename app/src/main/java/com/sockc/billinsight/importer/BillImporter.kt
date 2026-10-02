@@ -28,7 +28,7 @@ class BillImporter(
 
     fun parse(uri: Uri, merchantRules: Map<String, String>, zipPassword: String? = null): ParsedBill {
         val sourceName = queryName(uri) ?: "账单文件"
-        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+        val bytes = resolver.openInputStream(uri)?.use { BoundedBillReader.read(it) }
             ?: error("无法读取文件")
 
         val directXlsx = sourceName.endsWith(".xlsx", true) || XlsxParser.looksLikeXlsx(bytes)
@@ -242,7 +242,12 @@ class BillImporter(
                     listOf(".xlsx", ".csv", ".txt").any { h.fileName.endsWith(it, true) }
                 } ?: error("压缩包里没有找到 XLSX/CSV/TXT 账单")
 
-            return header.fileName.substringAfterLast('/') to zip.getInputStream(header).use { it.readBytes() }
+            require(header.uncompressedSize in 1L..BoundedBillReader.MAX_EXTRACTED_BYTES) {
+                "压缩包内账单超过 64 MB，请按月份分开导出"
+            }
+            return header.fileName.substringAfterLast('/') to zip.getInputStream(header).use {
+                BoundedBillReader.read(it,BoundedBillReader.MAX_EXTRACTED_BYTES)
+            }
         } catch (e: ZipException) {
             if (password.isNullOrBlank()) throw PasswordRequiredException()
             throw IllegalArgumentException("解压失败，请检查解压码是否正确", e)
