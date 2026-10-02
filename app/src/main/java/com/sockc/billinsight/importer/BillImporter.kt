@@ -104,7 +104,7 @@ class BillImporter(
         contextText: String,
     ): ParsedBill {
         val headers = rows[headerIndex].map(::normalizeHeader)
-        val platform = detectPlatform(headers, "$sourceName $contextText")
+        val platform = detectPlatform(headers, contextText, sourceName)
         val items = rows.drop(headerIndex + 1).mapNotNull { row ->
             parseRow(row, headers, platform, sourceName, merchantRules)
         }
@@ -143,11 +143,20 @@ class BillImporter(
         val transactionId = value("交易单号", "交易号", "支付宝交易号", "支付单号", "流水号")
         val merchantOrderId = value("商户单号", "商家订单号", "商户订单号", "订单号", "订单编号")
         val amountCent = parseAmountToCent(amountRaw)
+        val resolvedDirection = when {
+            direction.contains("支出") || direction.contains("收入") -> direction
+            direction.contains("退款") -> "收入"
+            direction.contains("付款") || direction.contains("支付") -> "支出"
+            direction.contains("收款") -> "收入"
+            platform in setOf(Platform.JD,Platform.DOUYIN,Platform.MEITUAN) &&
+                (status.contains("已支付") || status.contains("支付成功") || status.contains("交易成功")) -> "支出"
+            else -> direction
+        }
 
         if (time.isBlank() && merchant.isBlank() && description.isBlank() && amountCent == 0L) return null
 
         val classification = TransactionClassifier.classify(
-            direction = direction,
+            direction = resolvedDirection,
             type = type,
             merchant = merchant,
             description = description,
@@ -162,7 +171,7 @@ class BillImporter(
             time,
             merchant,
             description,
-            direction,
+            resolvedDirection,
             amountCent.toString()
         )
         return Transaction(
@@ -170,7 +179,7 @@ class BillImporter(
             occurredAt = occurredAt,
             counterparty = merchant,
             description = description.ifBlank { type },
-            directionText = direction,
+            directionText = resolvedDirection,
             tradeType = type,
             amountCent = amountCent,
             flowType = classification.flowType,
@@ -185,28 +194,36 @@ class BillImporter(
 
     private fun findHeaderRow(rows: List<List<String>>): Int {
         return rows.take(80).indexOfFirst { row ->
-            val joined = row.joinToString("|") { normalizeHeader(it) }
-            val score = listOf("交易时间", "交易对方", "金额", "收/支", "交易状态", "交易单号")
-                .count { joined.contains(normalizeHeader(it)) }
-            score >= 3
+            val cells = row.map(::normalizeHeader).toSet()
+            fun has(vararg keys: String) = keys.any { normalizeHeader(it) in cells }
+            has("交易时间","交易创建时间","付款时间","创建时间","支付时间","下单时间","订单时间","交易日期") &&
+                has("金额","金额(元)","金额（元）","交易金额","实付金额","支付金额","实收金额") &&
+                has("交易对方","对方","商户名称","交易商户","商家名称","店铺名称",
+                    "交易单号","交易号","订单号","订单编号","支付单号") &&
+                has("收/支","收支","收支类型","资金方向","交易方向",
+                    "交易类型","类型","交易状态","订单状态","支付状态")
         }
     }
 
-    private fun detectPlatform(headers: List<String>, text: String): Platform {
-        val all = (headers.joinToString("|") + text.take(5000)).lowercase()
+    private fun detectPlatform(headers: List<String>, text: String, sourceName: String): Platform {
+        val name = sourceName.lowercase()
+        val all = (headers.joinToString("|") + text.take(2500)).lowercase()
+        // A merchant name in a WeChat/Alipay statement must never re-label the
+        // entire file as an e-commerce export.
         return when {
-            (all.contains("京东") || all.contains("jd.com")) &&
-                headers.any { it.contains("订单") || it.contains("交易") } -> Platform.JD
-            (all.contains("抖音") || all.contains("douyin")) &&
-                headers.any { it.contains("订单") || it.contains("交易") } -> Platform.DOUYIN
-            (all.contains("美团") || all.contains("meituan")) &&
-                headers.any { it.contains("订单") || it.contains("交易") } -> Platform.MEITUAN
-            all.contains("微信支付") ||
-                all.contains("微信支付账单") ||
-                (all.contains("商户单号") && all.contains("当前状态")) -> Platform.WECHAT
-            all.contains("支付宝") ||
-                all.contains("商家订单号") ||
-                all.contains("交易创建时间") -> Platform.ALIPAY
+            name.contains("京东") || name.contains("jd_") -> Platform.JD
+            name.contains("抖音") || name.contains("douyin") -> Platform.DOUYIN
+            name.contains("美团") || name.contains("meituan") -> Platform.MEITUAN
+            all.contains("微信支付账单") ||
+                (headers.contains(normalizeHeader("商户单号")) &&
+                 headers.contains(normalizeHeader("当前状态"))) -> Platform.WECHAT
+            all.contains("支付宝交易记录") ||
+                headers.contains(normalizeHeader("支付宝交易号")) ||
+                headers.contains(normalizeHeader("商家订单号")) ||
+                headers.contains(normalizeHeader("交易创建时间")) -> Platform.ALIPAY
+            all.contains("京东账单") || all.contains("京东交易明细") -> Platform.JD
+            all.contains("抖音账单") || all.contains("抖音交易明细") -> Platform.DOUYIN
+            all.contains("美团账单") || all.contains("美团交易明细") -> Platform.MEITUAN
             else -> Platform.UNKNOWN
         }
     }
