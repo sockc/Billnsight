@@ -238,6 +238,7 @@ fun TransactionCard(
     item:Transaction,
     trailing:@Composable (() -> Unit)?=null,
     onMerchantClick:(()->Unit)?=null,
+    onCategoryClick:(()->Unit)?=null,
 ) {
     var expanded by remember(item.id) { mutableStateOf(false) }
     val incoming=item.directionText.contains("收入")
@@ -275,7 +276,9 @@ fun TransactionCard(
                     Row(verticalAlignment=Alignment.CenterVertically,
                         horizontalArrangement=Arrangement.spacedBy(5.dp)) {
                         PlatformBadge(item.platform)
-                        CategoryBadge(item.category)
+                        if(onCategoryClick!=null) Box(Modifier.clickable(onClick=onCategoryClick)) {
+                            CategoryBadge(item.category)
+                        } else CategoryBadge(item.category)
                     }
                 }
                 Column(horizontalAlignment=Alignment.End,
