@@ -37,8 +37,12 @@ object TransactionClassifier {
                 else -> Classification(FlowType.PENDING, "待确认")
             }
         }
+        // A credit-card bill payment is a real cash outflow, but not a second purchase.
+        if (outgoing && listOf("信用卡还款", "还信用卡", "偿还信用卡").any { kind.contains(it) }) {
+            return Classification(FlowType.CREDIT_REPAYMENT, "信用卡还款")
+        }
         // Known movements between accounts are not personal consumption.
-        if (listOf("充值", "提现", "信用卡还款", "余额宝", "零钱通", "资金转入", "资金转出")
+        if (listOf("充值", "提现", "余额宝", "零钱通", "资金转入", "资金转出")
                 .any { kind.contains(it) }) {
             return Classification(FlowType.TRANSFER, "资金流转")
         }

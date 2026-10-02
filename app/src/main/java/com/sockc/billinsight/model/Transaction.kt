@@ -4,7 +4,7 @@ enum class Platform { WECHAT, ALIPAY, UNKNOWN }
 enum class FlowType {
     EXPENSE, INCOME, TRANSFER, REFUND, IGNORE,
     PENDING, GIFT_EXPENSE, GIFT_INCOME, LOAN_OUT, LOAN_RECOVERY,
-    BUSINESS_EXPENSE, BUSINESS_INCOME,
+    BUSINESS_EXPENSE, BUSINESS_INCOME, CREDIT_REPAYMENT,
 }
 
 fun FlowType.displayName(): String = when (this) {
@@ -20,6 +20,7 @@ fun FlowType.displayName(): String = when (this) {
     FlowType.LOAN_RECOVERY -> "借款收回"
     FlowType.BUSINESS_EXPENSE -> "经营支出"
     FlowType.BUSINESS_INCOME -> "经营收款"
+    FlowType.CREDIT_REPAYMENT -> "信用卡还款"
 }
 
 fun FlowType.countsAsExpense(): Boolean =
@@ -63,12 +64,21 @@ data class DashboardSummary(
     val transactionCount: Int = 0,
     val smallExpenseCent: Long = 0,
     val smallExpenseCount: Int = 0,
+    val creditRepaymentCent: Long = 0,
+    val creditRepaymentCount: Int = 0,
+    val businessExpenseCent: Long = 0,
+    val loanOutCent: Long = 0,
+    val linkedRefundCent: Long = 0,
+    val linkedShareCent: Long = 0,
     val pendingCount: Int = 0,
     val giftExpenseCent: Long = 0,
     val giftIncomeCent: Long = 0,
     val giftExpenseCount: Int = 0,
     val giftIncomeCount: Int = 0,
-)
+) {
+    val cashOutflowCent: Long get() = expenseCent + creditRepaymentCent + businessExpenseCent + loanOutCent
+    val netExpenseCent: Long get() = (expenseCent - linkedRefundCent - linkedShareCent).coerceAtLeast(0)
+}
 
 data class ImportResult(
     val parsed: Int,
@@ -89,3 +99,14 @@ data class ProductGroup(
     val transactions: List<Transaction>,
     val unspecified: Boolean = false,
 )
+
+/** A receipt is attributed to an original expense without rewriting either imported transaction. */
+data class ExpenseLink(
+    val id: Long,
+    val expenseId: Long,
+    val receiptId: Long,
+    val kind: LinkKind,
+    val amountCent: Long,
+)
+
+enum class LinkKind { REFUND, SHARE }

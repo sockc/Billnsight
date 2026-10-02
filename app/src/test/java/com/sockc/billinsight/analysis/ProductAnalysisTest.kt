@@ -40,4 +40,16 @@ class ProductAnalysisTest {
         assertTrue(group.unspecified)
         assertEquals("商品未注明", group.product)
     }
+    @Test fun explicitlySavedAliasGroupsDifferentProductNames() {
+        val results = ProductAnalysis.groups(
+            listOf(
+                tx(Platform.WECHAT, "瑞幸咖啡", "生椰拿铁", 1800),
+                tx(Platform.ALIPAY, "瑞幸咖啡", "生椰拿铁（大杯）", 1900),
+            ),
+            mapOf("瑞幸咖啡|生椰拿铁(大杯)" to "生椰拿铁")
+        )
+        assertEquals(1, results.size)
+        assertEquals(2, results.single().count)
+        assertEquals(3700L, results.single().amountCent)
+    }
 }

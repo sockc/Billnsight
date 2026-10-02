@@ -219,7 +219,13 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onPlatformChange = viewModel::setPlatformFilter,
                     onNatureChange = viewModel::updateNature,
                 )
-                2 -> AnalysisScreen(state, viewModel::setPlatformFilter)
+                2 -> AnalysisScreen(
+                    state = state,
+                    onPlatformChange = viewModel::setPlatformFilter,
+                    onProductAlias = viewModel::saveProductAlias,
+                    onLinkRecovery = viewModel::linkRecovery,
+                    onDeleteLink = viewModel::unlinkRecovery,
+                )
                 3 -> DiscoverScreen(
                     state = state,
                     onPlatformChange = viewModel::setPlatformFilter,

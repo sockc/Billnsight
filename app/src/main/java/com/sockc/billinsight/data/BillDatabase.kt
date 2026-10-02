@@ -9,6 +9,8 @@ import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.model.LinkKind
+import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.RecurringExpense
@@ -45,6 +47,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         db.execSQL("CREATE INDEX idx_transactions_flow ON transactions(flow_type)")
         db.execSQL("CREATE INDEX idx_transactions_category ON transactions(category)")
         db.execSQL("CREATE INDEX idx_transactions_platform ON transactions(platform)")
+        createLinkAndAliasTables(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -104,6 +107,47 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             """.trimIndent()
             )
         }
+        if (oldVersion < 4) {
+            createLinkAndAliasTables(db)
+            // Old manual classifications cannot be reliably distinguished from automatic
+            // ones. Migrate only untouched auto-classified rows with explicit trade type.
+            db.execSQL(
+                """
+                UPDATE transactions SET flow_type='CREDIT_REPAYMENT', category='信用卡还款'
+                WHERE flow_type='TRANSFER' AND category='资金流转'
+                  AND (trade_type LIKE '%信用卡还款%' OR trade_type LIKE '%还信用卡%'
+                       OR (trade_type='' AND (description LIKE '%信用卡还款%' OR description LIKE '%还信用卡%')))
+                  AND direction_text LIKE '%支出%'
+                """.trimIndent()
+            )
+            matchRefundsInTransaction(db)
+        }
+    }
+
+    private fun createLinkAndAliasTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS transaction_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                expense_id INTEGER NOT NULL REFERENCES transactions(id),
+                receipt_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id),
+                kind TEXT NOT NULL CHECK (kind IN ('REFUND','SHARE')),
+                amount_cent INTEGER NOT NULL CHECK (amount_cent > 0),
+                created_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_links_expense ON transaction_links(expense_id)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS product_aliases (
+                merchant_key TEXT NOT NULL,
+                alias_key TEXT NOT NULL,
+                canonical TEXT NOT NULL,
+                PRIMARY KEY (merchant_key, alias_key)
+            )
+            """.trimIndent()
+        )
     }
 
     fun insertAll(items: List<Transaction>): Pair<Int, Int> {
@@ -150,10 +194,23 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                             arrayOf(item.fingerprint)
                         )
                     }
+                    if (item.flowType == FlowType.CREDIT_REPAYMENT) {
+                        writableDatabase.update(
+                            "transactions",
+                            ContentValues().apply {
+                                put("flow_type", "CREDIT_REPAYMENT")
+                                put("category", "信用卡还款")
+                                put("trade_type", item.tradeType)
+                            },
+                            "fingerprint=? AND flow_type='TRANSFER' AND category='资金流转'",
+                            arrayOf(item.fingerprint),
+                        )
+                    }
                 } else {
                     inserted++
                 }
             }
+            matchRefundsInTransaction(writableDatabase)
             writableDatabase.setTransactionSuccessful()
         } finally {
             writableDatabase.endTransaction()
@@ -204,7 +261,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             args += it.name
         }
         when (flowFilter) {
-            "EXPENSE" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT')"
+            "EXPENSE" -> where += "flow_type IN ('EXPENSE','GIFT_EXPENSE','BUSINESS_EXPENSE','LOAN_OUT','CREDIT_REPAYMENT')"
             "INCOME" -> where += "flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY','REFUND')"
             "OTHER" -> where += "flow_type IN ('TRANSFER','PENDING','IGNORE')"
         }
@@ -224,6 +281,164 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
     }
 
+
+    /**
+     * Automatically match an unlinked refund only when the merchant-order ID
+     * uniquely identifies one original purchase. Never guess by similar price.
+     */
+    private fun matchRefundsInTransaction(db: SQLiteDatabase) {
+        db.rawQuery(
+            """
+            SELECT r.id, r.amount_cent, e.id
+            FROM transactions r JOIN transactions e
+              ON r.merchant_order_id=e.merchant_order_id
+            WHERE r.flow_type='REFUND' AND e.flow_type IN ('EXPENSE','GIFT_EXPENSE')
+              AND r.merchant_order_id <> '' AND r.id<>e.id
+              AND NOT EXISTS (SELECT 1 FROM transaction_links l WHERE l.receipt_id=r.id)
+            ORDER BY r.id DESC
+            """.trimIndent(), null
+        ).use { cursor ->
+            val byReceipt = linkedMapOf<Long, MutableList<Pair<Long,Long>>>()
+            while (cursor.moveToNext()) {
+                val receiptId = cursor.getLong(0)
+                byReceipt.getOrPut(receiptId) { mutableListOf() }
+                    .add(cursor.getLong(2) to cursor.getLong(1))
+            }
+            byReceipt.forEach { (receiptId, candidates) ->
+                if (candidates.size == 1) {
+                    val (expenseId, amount) = candidates.single()
+                    runCatching { createLinkTx(db, expenseId, receiptId, LinkKind.REFUND, amount) }
+                }
+            }
+        }
+    }
+
+    fun createLink(expenseId: Long, receiptId: Long, kind: LinkKind, amountCent: Long) {
+        writableDatabase.beginTransaction()
+        try {
+            createLinkTx(writableDatabase, expenseId, receiptId, kind, amountCent)
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    private fun createLinkTx(
+        db: SQLiteDatabase, expenseId: Long, receiptId: Long,
+        kind: LinkKind, amountCent: Long,
+    ) {
+        require(expenseId != receiptId && amountCent > 0) { "请选择不同的原消费和收款记录" }
+        val expense = db.rawQuery(
+            "SELECT amount_cent, flow_type FROM transactions WHERE id=?",
+            arrayOf(expenseId.toString())
+        ).use { c ->
+            require(c.moveToFirst()) { "找不到原消费" }
+            c.getLong(0) to c.getString(1)
+        }
+        val receipt = db.rawQuery(
+            "SELECT amount_cent, flow_type FROM transactions WHERE id=?",
+            arrayOf(receiptId.toString())
+        ).use { c ->
+            require(c.moveToFirst()) { "找不到退款或分摊收款" }
+            c.getLong(0) to c.getString(1)
+        }
+        require(expense.second in setOf("EXPENSE", "GIFT_EXPENSE")) { "只有个人消费可以关联退款或 AA 分摊" }
+        require(receipt.second == if (kind == LinkKind.REFUND) "REFUND" else "INCOME") {
+            "请选取正确性质的收款流水"
+        }
+        val allocated = db.rawQuery(
+            "SELECT COALESCE(SUM(amount_cent),0) FROM transaction_links WHERE expense_id=?",
+            arrayOf(expenseId.toString())
+        ).use { c -> c.moveToFirst(); c.getLong(0) }
+        require(amountCent <= receipt.first && amountCent <= expense.first - allocated) {
+            "关联金额超过原消费剩余金额或收款金额"
+        }
+        val inserted = db.insertWithOnConflict(
+            "transaction_links", null, ContentValues().apply {
+                put("expense_id", expenseId)
+                put("receipt_id", receiptId)
+                put("kind", kind.name)
+                put("amount_cent", amountCent)
+                put("created_at", System.currentTimeMillis())
+            }, SQLiteDatabase.CONFLICT_IGNORE
+        )
+        require(inserted != -1L) { "该收款已关联其他消费" }
+    }
+
+    fun deleteLink(linkId: Long) {
+        require(linkId > 0)
+        writableDatabase.delete("transaction_links", "id=?", arrayOf(linkId.toString()))
+    }
+
+    fun linksForMonth(month: YearMonth, platform: Platform? = null): List<ExpenseLink> {
+        val (start, end) = monthRange(month)
+        val args = mutableListOf(start.toString(), end.toString())
+        val where = if (platform == null) "" else " AND t.platform=?"
+        platform?.let { args += it.name }
+        readableDatabase.rawQuery(
+            """
+            SELECT l.id,l.expense_id,l.receipt_id,l.kind,l.amount_cent
+            FROM transaction_links l JOIN transactions t ON t.id=l.expense_id
+            WHERE t.occurred_at >= ? AND t.occurred_at < ?$where
+            ORDER BY t.occurred_at DESC
+            """.trimIndent(), args.toTypedArray()
+        ).use { c ->
+            return buildList {
+                while (c.moveToNext()) add(
+                    ExpenseLink(c.getLong(0), c.getLong(1), c.getLong(2),
+                        LinkKind.valueOf(c.getString(3)), c.getLong(4))
+                )
+            }
+        }
+    }
+
+    fun linkedReceiptIds(): Set<Long> {
+        readableDatabase.rawQuery("SELECT receipt_id FROM transaction_links", null).use { c ->
+            return buildSet {
+                while (c.moveToNext()) add(c.getLong(0))
+            }
+        }
+    }
+
+    fun productAliases(): Map<String,String> {
+        readableDatabase.rawQuery(
+            "SELECT merchant_key,alias_key,canonical FROM product_aliases", null
+        ).use { c ->
+            return buildMap {
+                while (c.moveToNext()) put(c.getString(0) + "|" + c.getString(1), c.getString(2))
+            }
+        }
+    }
+
+    fun saveProductAlias(merchant: String, alias: String, canonical: String) {
+        require(merchant.isNotBlank() && alias.isNotBlank() && canonical.isNotBlank())
+        writableDatabase.insertWithOnConflict(
+            "product_aliases", null, ContentValues().apply {
+                put("merchant_key", merchant.trim().lowercase())
+                put("alias_key", alias.trim().lowercase())
+                put("canonical", canonical.trim())
+            }, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    private fun linkedRecovery(month: YearMonth, platform: Platform?): Pair<Long, Long> {
+        val (start, end) = monthRange(month)
+        val platformSql = if (platform == null) "" else " AND t.platform=?"
+        val args = mutableListOf(start.toString(), end.toString())
+        platform?.let { args += it.name }
+        readableDatabase.rawQuery(
+            """
+            SELECT COALESCE(SUM(CASE WHEN l.kind='REFUND' THEN l.amount_cent ELSE 0 END),0),
+                   COALESCE(SUM(CASE WHEN l.kind='SHARE' THEN l.amount_cent ELSE 0 END),0)
+            FROM transaction_links l JOIN transactions t ON t.id=l.expense_id
+            WHERE t.occurred_at >= ? AND t.occurred_at < ?$platformSql
+            """.trimIndent(), args.toTypedArray()
+        ).use { c ->
+            c.moveToFirst()
+            return c.getLong(0) to c.getLong(1)
+        }
+    }
+
     fun summary(
         month: YearMonth,
         platform: Platform? = null,
@@ -234,7 +449,10 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         val sql = """
             SELECT
               COALESCE(SUM(CASE WHEN flow_type IN ('EXPENSE','GIFT_EXPENSE') THEN amount_cent ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN flow_type='INCOME' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='INCOME'
+                  AND NOT EXISTS(SELECT 1 FROM transaction_links l
+                                 WHERE l.receipt_id=transactions.id)
+                THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='REFUND' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='TRANSFER' THEN amount_cent ELSE 0 END), 0),
               COUNT(*),
@@ -244,7 +462,11 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
               COALESCE(SUM(CASE WHEN flow_type='GIFT_EXPENSE' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='GIFT_INCOME' THEN amount_cent ELSE 0 END), 0),
               COALESCE(SUM(CASE WHEN flow_type='GIFT_EXPENSE' THEN 1 ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN flow_type='GIFT_INCOME' THEN 1 ELSE 0 END), 0)
+              COALESCE(SUM(CASE WHEN flow_type='GIFT_INCOME' THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='CREDIT_REPAYMENT' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='CREDIT_REPAYMENT' THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='BUSINESS_EXPENSE' THEN amount_cent ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN flow_type='LOAN_OUT' THEN amount_cent ELSE 0 END), 0)
             FROM transactions
             WHERE occurred_at >= ? AND occurred_at < ?$platformClause
         """.trimIndent()
@@ -258,7 +480,14 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
         readableDatabase.rawQuery(sql, args.toTypedArray()).use { c ->
             c.moveToFirst()
+            val linked = linkedRecovery(month, platform)
             return DashboardSummary(
+                linkedRefundCent = linked.first,
+                linkedShareCent = linked.second,
+                creditRepaymentCent = c.getLong(12),
+                creditRepaymentCount = c.getInt(13),
+                businessExpenseCent = c.getLong(14),
+                loanOutCent = c.getLong(15),
                 expenseCent = c.getLong(0),
                 incomeCent = c.getLong(1),
                 refundCent = c.getLong(2),
@@ -457,6 +686,11 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     fun updateNature(id: Long, flowType: FlowType, category: String) {
         require(id > 0) { "无效流水" }
         require(category.isNotBlank()) { "请选择分类" }
+        val linked = readableDatabase.rawQuery(
+            "SELECT 1 FROM transaction_links WHERE expense_id=? OR receipt_id=? LIMIT 1",
+            arrayOf(id.toString(), id.toString())
+        ).use { it.moveToFirst() }
+        require(!linked) { "这笔流水已有退款或 AA 关联，请先撤销关联再修改性质" }
         writableDatabase.update(
             "transactions",
             ContentValues().apply {
@@ -541,6 +775,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 3
+        private const val DB_VERSION = 4
     }
 }

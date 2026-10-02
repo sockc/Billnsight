@@ -94,4 +94,20 @@ class TransactionClassifierTest {
         val actual = TransactionClassifier.classify("收入", "收钱码", "XX饭店", "扫码收款", "收款成功", mapOf("XX饭店" to "餐饮"))
         assertEquals(FlowType.INCOME, actual.flowType)
     }
+
+    @Test fun creditCardRepaymentIsCashOutflowNotTransfer() {
+        val actual = TransactionClassifier.classify("支出", "信用卡还款", "招商银行", "还信用卡", "成功", emptyMap())
+        assertEquals(FlowType.CREDIT_REPAYMENT, actual.flowType)
+        assertEquals("信用卡还款", actual.category)
+    }
+
+    @Test fun creditCardPurchaseRemainsExpense() {
+        val actual = TransactionClassifier.classify("支出", "商户消费", "便利店", "信用卡支付", "成功", emptyMap())
+        assertEquals(FlowType.EXPENSE, actual.flowType)
+    }
+
+    @Test fun walletTopupStaysTransfer() {
+        val actual = TransactionClassifier.classify("支出", "零钱充值", "微信零钱", "充值", "成功", emptyMap())
+        assertEquals(FlowType.TRANSFER, actual.flowType)
+    }
 }

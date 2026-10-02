@@ -83,6 +83,13 @@ fun DiscoverScreen(
         }
         item {
             InsightCard(
+                title = "信用卡还款",
+                main = state.summary.creditRepaymentCent.toYuanText(),
+                detail = "${state.summary.creditRepaymentCount} 笔 · 计入资金支出，不重复计入实际消费",
+            )
+        }
+        item {
+            InsightCard(
                 title = "转账与资金流转",
                 main = state.summary.transferCent.toYuanText(),
                 detail = "这部分不算消费，避免银行卡→微信→付款被重复计算。",
@@ -149,8 +156,14 @@ fun DiscoverScreen(
                 modifier = Modifier.padding(20.dp)
             )
         }
-        items(state.merchants.take(10)) { item ->
-            InsightCard(item.merchant, item.amountCent.toYuanText(), "${item.count} 笔消费")
+        items(state.merchantGroups.take(10)) { item ->
+            val rank = state.merchantGroups.indexOfFirst { it.key == item.key } + 1
+            MerchantRankCard(
+                rank = rank,
+                group = item,
+                maxAmount = state.merchantGroups.firstOrNull()?.amountCent ?: 1L,
+                aliases = state.productAliases,
+            )
         }
     }
 }

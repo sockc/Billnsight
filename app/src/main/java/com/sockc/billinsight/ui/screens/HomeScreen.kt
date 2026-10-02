@@ -38,8 +38,8 @@ fun HomeScreen(
     onPlatformChange: (Platform?) -> Unit,
     onReviewPending: () -> Unit,
 ) {
-    val current = state.summary.expenseCent
-    val previous = state.previousSummary.expenseCent
+    val current = state.summary.netExpenseCent
+    val previous = state.previousSummary.netExpenseCent
     val delta = current - previous
     val percent = if (previous > 0) delta * 100.0 / previous else null
     var expandedSummary by remember(state.month, state.platformFilter) { mutableStateOf<String?>(null) }
@@ -52,7 +52,7 @@ fun HomeScreen(
     val allExpense = state.monthlyTransactions.filter { tx ->
         tx.flowType in setOf(
             FlowType.EXPENSE, FlowType.GIFT_EXPENSE, FlowType.BUSINESS_EXPENSE,
-            FlowType.LOAN_OUT
+            FlowType.LOAN_OUT, FlowType.CREDIT_REPAYMENT
         ) || (tx.directionText.contains("支出") && tx.flowType == FlowType.TRANSFER)
     }
 
@@ -63,7 +63,7 @@ fun HomeScreen(
         item {
             Card(Modifier.fillMaxWidth().padding(16.dp)) {
                 Column(Modifier.padding(18.dp)) {
-                    Text("${platformLabel(state.platformFilter)} · 本月消费", style = MaterialTheme.typography.labelLarge)
+                    Text("${platformLabel(state.platformFilter)} · 本月实际净消费", style = MaterialTheme.typography.labelLarge)
                     Text(
                         current.toYuanText(),
                         style = MaterialTheme.typography.headlineLarge,
@@ -83,6 +83,24 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(12.dp))
+                    Text(
+                        "原始消费 ${state.summary.expenseCent.toYuanText()} · 已关联退款 " +
+                            "${state.summary.linkedRefundCent.toYuanText()} · AA 分摊 " +
+                            state.summary.linkedShareCent.toYuanText(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                    Text(
+                        "本月资金支出（含信用卡还款）：${state.summary.cashOutflowCent.toYuanText()}",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "其中信用卡还款 ${state.summary.creditRepaymentCent.toYuanText()}（" +
+                            "${state.summary.creditRepaymentCount} 笔），不重复计入消费。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         SummaryMini("收入", state.summary.incomeCent.toYuanText())
                         SummaryMini("退款", state.summary.refundCent.toYuanText())

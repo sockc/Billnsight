@@ -23,7 +23,7 @@ fun SettingsScreen(
     onRestoreBackup: () -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
-        item { PageTitle("我的", "V0.1.5 · 本地优先") }
+        item { PageTitle("我的", "V0.1.6 · 本地优先") }
         item {
             Button(onClick = onImport, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 Text("导入微信 / 支付宝账单")
@@ -63,7 +63,13 @@ fun SettingsScreen(
         item {
             Card(Modifier.fillMaxWidth().padding(16.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("V0.1.5 新增", style = MaterialTheme.typography.titleMedium)
+                    Text("V0.1.6 新增", style = MaterialTheme.typography.titleMedium)
+                    Text("• 信用卡还款单独计入支出，避免净消费重复计算")
+                    Text("• 商户排行卡片排版、备注过滤和规范化合并")
+                    Text("• 退款、AA 关联原消费，净消费及跨月支持")
+                    Text("• 收入类型 → 付款人 → 全部收入下钻")
+                    Text("• 同一商户商品别名归并，不覆盖原始账单")
+                    Text("• 加密备份兼容新版交易关联")
                     Text("• 二维码付款直接计个人消费、收款直接计个人收入")
                     Text("• 所有收入支出可原位置展开全部明细")
                     Text("• 分类 → 商户 → 商品 → 每笔消费")

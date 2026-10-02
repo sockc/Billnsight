@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sockc.billinsight.analysis.ProductAnalysis
+import com.sockc.billinsight.analysis.MerchantAnalysis
+import com.sockc.billinsight.analysis.MerchantGroup
 import com.sockc.billinsight.data.BillDatabase
 import com.sockc.billinsight.data.BackupManager
 import com.sockc.billinsight.importer.BillImporter
@@ -14,6 +16,8 @@ import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.ImportResult
 import com.sockc.billinsight.model.FlowType
+import com.sockc.billinsight.model.LinkKind
+import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
 import com.sockc.billinsight.model.ProductGroup
 import com.sockc.billinsight.model.Platform
@@ -59,13 +63,20 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 val thresholdCent = smallThresholdYuan * 100L
                 val categories = db.categoryTotals(month, platform)
                 val monthly = db.monthTransactions(month, platform)
+                val aliases = db.productAliases()
                 BillUiState(
                     searchQuery = searchQuery,
                     searchFlowFilter = searchFlowFilter,
                     searchLimit = searchLimit,
                     searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit),
                     monthlyTransactions = monthly,
-                    productGroups = ProductAnalysis.groups(monthly),
+                    productGroups = ProductAnalysis.groups(monthly, aliases),
+                    productAliases = aliases,
+                    merchantGroups = MerchantAnalysis.groups(monthly),
+                    links = db.linksForMonth(month, platform),
+                    linkedReceiptIds = db.linkedReceiptIds(),
+                    linkableReceipts = db.searchTransactions("", null, "INCOME", 2000)
+                        .filter { it.flowType in setOf(FlowType.INCOME, FlowType.REFUND) },
                     month = month,
                     platformFilter = platform,
                     smallThresholdYuan = smallThresholdYuan,
@@ -162,6 +173,45 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 message = "已改为 $category${if (rememberMerchant) "，并记住该商户" else ""}"
             )
             refresh()
+        }
+    }
+
+    fun saveProductAlias(merchant: String, alias: String, canonical: String) {
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) { db.saveProductAlias(merchant, alias, canonical) }
+            }
+            _uiState.value = _uiState.value.copy(
+                message = if (result.isSuccess) "同一商户商品名称已合并"
+                          else result.exceptionOrNull()?.message ?: "合并失败"
+            )
+            if (result.isSuccess) refresh()
+        }
+    }
+
+    fun linkRecovery(expenseId: Long, receiptId: Long, kind: LinkKind, amountCent: Long) {
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) { db.createLink(expenseId, receiptId, kind, amountCent) }
+            }
+            _uiState.value = _uiState.value.copy(
+                message = if (result.isSuccess) "关联成功，已重新计算净消费"
+                          else result.exceptionOrNull()?.message ?: "关联失败"
+            )
+            if (result.isSuccess) refresh()
+        }
+    }
+
+    fun unlinkRecovery(linkId: Long) {
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) { db.deleteLink(linkId) }
+            }
+            _uiState.value = _uiState.value.copy(
+                message = if (result.isSuccess) "已撤销关联"
+                          else result.exceptionOrNull()?.message ?: "撤销失败"
+            )
+            if (result.isSuccess) refresh()
         }
     }
 
@@ -272,6 +322,11 @@ data class BillUiState(
     val transactions: List<Transaction> = emptyList(),
     val monthlyTransactions: List<Transaction> = emptyList(),
     val productGroups: List<ProductGroup> = emptyList(),
+    val productAliases: Map<String,String> = emptyMap(),
+    val merchantGroups: List<MerchantGroup> = emptyList(),
+    val links: List<ExpenseLink> = emptyList(),
+    val linkedReceiptIds: Set<Long> = emptySet(),
+    val linkableReceipts: List<Transaction> = emptyList(),
     val searchQuery: String = "",
     val searchFlowFilter: String = "ALL",
     val searchLimit: Int = 200,

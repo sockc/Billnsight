@@ -43,7 +43,7 @@ fun TransactionNatureDialog(
         FlowType.BUSINESS_INCOME, FlowType.REFUND, FlowType.TRANSFER, FlowType.IGNORE
     ) else listOf(
         FlowType.EXPENSE, FlowType.GIFT_EXPENSE, FlowType.LOAN_OUT,
-        FlowType.BUSINESS_EXPENSE, FlowType.TRANSFER, FlowType.IGNORE
+        FlowType.BUSINESS_EXPENSE, FlowType.CREDIT_REPAYMENT, FlowType.TRANSFER, FlowType.IGNORE
     )
     var nature by remember(transaction.id) {
         mutableStateOf<FlowType?>(transaction.flowType.takeUnless { it == FlowType.PENDING })
@@ -96,6 +96,7 @@ fun TransactionNatureDialog(
                         FlowType.LOAN_OUT -> "借出款"
                         FlowType.LOAN_RECOVERY -> "借款收回"
                         FlowType.TRANSFER -> "资金流转"
+                        FlowType.CREDIT_REPAYMENT -> "信用卡还款"
                         FlowType.INCOME -> "收入"
                         FlowType.REFUND -> "退款"
                         FlowType.IGNORE -> "忽略"
