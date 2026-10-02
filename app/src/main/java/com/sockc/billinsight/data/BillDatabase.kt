@@ -711,6 +711,9 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 (flow_type NOT IN ('EXPENSE','GIFT_EXPENSE') OR
                 (payment_method NOT LIKE '%信用卡%' AND payment_method NOT LIKE '%贷记卡%')))"""
             "INCOME" -> where += "flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME','LOAN_RECOVERY','LOAN_DISBURSEMENT','REFUND')"
+            "RECEIPTS" -> where += """flow_type IN ('INCOME','GIFT_INCOME','BUSINESS_INCOME')
+                AND NOT EXISTS(SELECT 1 FROM transaction_links l
+                               WHERE l.receipt_id=transactions.id)"""
             "OTHER" -> where += "flow_type IN ('TRANSFER','PENDING','IGNORE')"
         }
         if (query.isNotBlank()) {
@@ -1618,28 +1621,40 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     }
 
     /** Review queue across all imported months; never limited to the latest 500 transactions. */
-    fun pendingTransactions(platform: Platform? = null, limit: Int = 200): List<Transaction> {
-        val where = "flow_type='PENDING'" + if (platform == null) "" else " AND platform=?"
-        readableDatabase.query(
-            "transactions", null, where,
-            platform?.let { arrayOf(it.name) }, null, null,
-            "occurred_at DESC", limit.toString()
-        ).use { cursor ->
-            return buildList {
-                while (cursor.moveToNext()) add(cursor.toTransaction())
-            }
-        }
+    fun pendingTransactions(
+        platform: Platform? = null, limit: Int = 200,
+        start: Long? = null, end: Long? = null
+    ): List<Transaction> {
+        val (where,args)=pendingWhere(platform,start,end)
+        readableDatabase.query("transactions",null,where,args,null,null,
+            "occurred_at DESC",limit.toString()
+        ).use { c -> return buildList {
+            while(c.moveToNext()) add(c.toTransaction())
+        }}
     }
 
-    fun pendingTotal(platform: Platform? = null): Int {
-        val where = "flow_type='PENDING'" + if (platform == null) "" else " AND platform=?"
-        readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM transactions WHERE $where",
-            platform?.let { arrayOf(it.name) }
-        ).use { cursor ->
-            cursor.moveToFirst()
-            return cursor.getInt(0)
+    fun pendingTotal(
+        platform: Platform? = null, start: Long? = null, end: Long? = null
+    ): Int {
+        val (where,args)=pendingWhere(platform,start,end)
+        return readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM transactions WHERE $where",args
+        ).use { c -> c.moveToFirst(); c.getInt(0) }
+    }
+
+    private fun pendingWhere(
+        platform: Platform?, start: Long?, end: Long?
+    ): Pair<String,Array<String>> {
+        val where=mutableListOf("flow_type='PENDING'")
+        val args=mutableListOf<String>()
+        platform?.let { where+="platform=?"; args+=it.name }
+        if(start!=null && end!=null) {
+            require(end>start)
+            where+="occurred_at>=? AND occurred_at<?"
+            args+=start.toString()
+            args+=end.toString()
         }
+        return where.joinToString(" AND ") to args.toTypedArray()
     }
 
     /**
