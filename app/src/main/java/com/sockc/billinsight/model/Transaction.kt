@@ -48,6 +48,13 @@ data class Transaction(
 
 data class CategoryTotal(val category: String, val amountCent: Long, val count: Int)
 data class MerchantTotal(val merchant: String, val amountCent: Long, val count: Int)
+/** Preview uses the exact same merchant grouping as the save operation. */
+data class CategoryEditPreview(
+    val eligibleCount: Int = 0,
+    val protectedCount: Int = 0,
+    val variantCount: Int = 0,
+)
+
 data class PlatformCategoryRule(val platform: Platform, val merchant: String, val category: String, val affectedCount: Int)
 
 data class DailyTotal(val dayOfMonth: Int, val amountCent: Long, val count: Int)
