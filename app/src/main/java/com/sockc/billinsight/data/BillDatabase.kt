@@ -16,6 +16,8 @@ import com.sockc.billinsight.model.MerchantRule
 import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.importer.CreditRepaymentDetector
 import com.sockc.billinsight.importer.ScanPaymentClassifier
+import com.sockc.billinsight.importer.MerchantCategoryPolicy
+import com.sockc.billinsight.model.CategoryEditPreview
 import com.sockc.billinsight.importer.StrongDuplicateKey
 import com.sockc.billinsight.importer.TransactionClassifier
 import com.sockc.billinsight.importer.MerchantNatureRule
@@ -205,50 +207,97 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     }
 
     /** Exact merchant and source only. Generic QR payees never create rules. */
+    /** One merchant group and one correction policy for every screen. */
+    private fun expenseMerchantMatches(
+        db: SQLiteDatabase, selected: Transaction
+    ): List<Pair<Transaction, Boolean>> {
+        val aliases=merchantAliases()
+        val key=MerchantCategoryPolicy.key(selected,aliases) ?: return emptyList()
+        return db.query("transactions",null,
+            "platform=? AND flow_type='EXPENSE' AND id<>?",
+            arrayOf(selected.platform.name,selected.id.toString()),
+            null,null,null
+        ).use { cursor ->
+            buildList {
+                while(cursor.moveToNext()) {
+                    val other=cursor.toTransaction()
+                    if(MerchantCategoryPolicy.key(other,aliases)==key) {
+                        val manuallyEdited=cursor.getInt(
+                            cursor.getColumnIndexOrThrow("nature_modified"))!=0
+                        add(other to MerchantCategoryPolicy.canReplaceHistorical(
+                            other,manuallyEdited))
+                    }
+                }
+            }
+        }
+    }
+
+    fun previewExpenseCategory(id: Long): CategoryEditPreview {
+        val db=readableDatabase
+        val selected=db.query("transactions",null,"id=?",
+            arrayOf(id.toString()),null,null,null
+        ).use { c -> if(c.moveToFirst()) c.toTransaction() else null }
+            ?: return CategoryEditPreview()
+        val matches=expenseMerchantMatches(db,selected)
+        val distinctNames=matches.map {
+            MerchantCategoryPolicy.normalize(it.first.counterparty)
+        }.distinct().count {
+            it!=MerchantCategoryPolicy.normalize(selected.counterparty)
+        }
+        return CategoryEditPreview(
+            eligibleCount=matches.count { it.second },
+            protectedCount=matches.count { !it.second },
+            variantCount=distinctNames
+        )
+    }
+
     fun changeExpenseCategory(id: Long, category: String, scope: String): Int {
-        require(scope in setOf("SINGLE", "MERCHANT", "FUTURE"))
+        require(scope in setOf("SINGLE","MERCHANT","FUTURE"))
         require(category in TransactionClassifier.categories)
         val db=writableDatabase
         db.beginTransaction()
         try {
-            val tx=db.query("transactions",null,"id=?",arrayOf(id.toString()),null,null,null)
-                .use { c -> if(c.moveToFirst()) c.toTransaction() else null }
+            val selected=db.query("transactions",null,"id=?",
+                arrayOf(id.toString()),null,null,null
+            ).use { c -> if(c.moveToFirst()) c.toTransaction() else null }
                 ?: error("找不到这笔交易")
-            require(tx.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) {
+            require(selected.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) {
                 "仅消费类交易可以修改商户消费分类"
             }
-            val merchant=tx.counterparty.trim()
-            val batch=merchant.isNotEmpty() &&
-                !ScanPaymentClassifier.isGenericCounterparty(merchant) &&
-                tx.platform!=Platform.UNKNOWN && tx.flowType==FlowType.EXPENSE &&
-                tx.sourceFile!="手动记账"
-            require(scope=="SINGLE" || batch) {
-                "此交易没有明确的商家名称，请仅修改当前这一笔"
+            val aliases=merchantAliases()
+            val groupKey=MerchantCategoryPolicy.key(selected,aliases)
+            require(scope=="SINGLE" || groupKey!=null) {
+                "商户信息不明确，请仅修改当前一笔"
             }
-            var affected=0
+            var changed=0
             if(scope!="FUTURE") {
-                affected+=db.update("transactions",ContentValues().apply {
+                changed+=db.update("transactions",ContentValues().apply {
                     put("category",category)
                     put("nature_modified",1)
-                },"id=?",arrayOf(id.toString()))
+                },"id=?",arrayOf(selected.id.toString()))
             }
-            if(scope!="SINGLE") {
-                db.insertWithOnConflict("platform_category_rules",null,ContentValues().apply {
-                    put("platform",tx.platform.name)
-                    put("merchant",merchant)
-                    put("category",category)
-                    put("updated_at",System.currentTimeMillis())
-                },SQLiteDatabase.CONFLICT_REPLACE)
-                if(scope=="MERCHANT") {
-                    affected+=db.update("transactions",ContentValues().apply {
+            if(scope!="SINGLE" && groupKey!=null) {
+                db.insertWithOnConflict(
+                    "platform_category_rules",null,ContentValues().apply {
+                        put("platform",selected.platform.name)
+                        put("merchant",selected.counterparty.trim())
                         put("category",category)
-                    },"platform=? AND counterparty=? AND flow_type='EXPENSE' AND nature_modified=0",
-                        arrayOf(tx.platform.name,merchant))
+                        put("updated_at",System.currentTimeMillis())
+                    },SQLiteDatabase.CONFLICT_REPLACE
+                )
+                if(scope=="MERCHANT") {
+                    expenseMerchantMatches(db,selected)
+                        .filter { it.second }
+                        .forEach { (other,_) ->
+                            changed+=db.update("transactions",ContentValues().apply {
+                                put("category",category)
+                            },"id=?",arrayOf(other.id.toString()))
+                        }
                 }
             }
             db.setTransactionSuccessful()
-            return affected
-        } finally { db.endTransaction() }
+            return changed
+        } finally {db.endTransaction()}
     }
 
     fun platformCategoryRules(): List<com.sockc.billinsight.model.PlatformCategoryRule> =
@@ -274,32 +323,36 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             "platform=? AND merchant=?",arrayOf(platform.name,merchant.trim()))
     }
 
-    fun platformCategoryRuleCount(tx: Transaction): Int {
-        if (tx.counterparty.isBlank()) return 0
-        return readableDatabase.rawQuery(
-            """SELECT COUNT(*) FROM transactions
-               WHERE platform=? AND counterparty=? AND flow_type='EXPENSE'
-                 AND nature_modified=0 AND id!=?""",
-            arrayOf(tx.platform.name,tx.counterparty.trim(),tx.id.toString())
-        ).use { c -> c.moveToFirst(); c.getInt(0) }
-    }
+    fun platformCategoryRuleCount(tx: Transaction): Int =
+        previewExpenseCategory(tx.id).eligibleCount
 
+    /** Import and existing ledger read the very same saved category. */
     fun applyPlatformCategoryRules(items: List<Transaction>): List<Transaction> {
+        val aliases=merchantAliases()
         val rules=mutableMapOf<Pair<Platform,String>,String>()
-        readableDatabase.rawQuery("SELECT platform,merchant,category FROM platform_category_rules",null)
-            .use { c ->
-                while(c.moveToNext()) {
-                    val platform=runCatching { Platform.valueOf(c.getString(0)) }.getOrNull()
-                    if(platform!=null) rules[platform to c.getString(1)]=c.getString(2)
-                }
+        readableDatabase.rawQuery(
+            "SELECT platform,merchant,category FROM platform_category_rules ORDER BY updated_at DESC",
+            null
+        ).use { c ->
+            while(c.moveToNext()) {
+                val p=runCatching {Platform.valueOf(c.getString(0))}.getOrNull()
+                    ?: continue
+                val template=Transaction(
+                    platform=p,occurredAt=0,counterparty=c.getString(1),
+                    description="",directionText="支出",amountCent=1,
+                    flowType=FlowType.EXPENSE,category=c.getString(2),
+                    paymentMethod="",transactionId="",merchantOrderId="",
+                    sourceFile="导入",fingerprint=""
+                )
+                val key=MerchantCategoryPolicy.key(template,aliases)
+                if(key!=null && key !in rules) rules[key]=c.getString(2)
             }
+        }
         if(rules.isEmpty()) return items
         return items.map { tx ->
-            val category=rules[tx.platform to tx.counterparty.trim()]
-            if(tx.flowType==FlowType.EXPENSE && category!=null &&
-                tx.sourceFile!="手动记账" &&
-                !ScanPaymentClassifier.isGenericCounterparty(tx.counterparty))
-                tx.copy(category=category) else tx
+            val key=MerchantCategoryPolicy.key(tx,aliases)
+            val category=key?.let { rules[it] }
+            if(category!=null) tx.copy(category=category) else tx
         }
     }
 
