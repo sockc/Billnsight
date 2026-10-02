@@ -20,11 +20,13 @@ class ScanPaymentClassifierTest {
         assertEquals(FlowType.EXPENSE,
             classify("支出","扫码支付","李四","AA晚餐").flowType)
     }
-    @Test fun ordinaryFriendTransferRemainsReviewAndQrReceiptIsIncome() {
-        assertEquals(FlowType.PENDING,
-            classify("支出","微信转账","张三","晚饭").flowType)
-        assertEquals(FlowType.INCOME,
-            classify("收入","二维码收款","张三","收款成功").flowType)
+    @Test fun ordinaryFriendTransferIsExpenseAndQrReceiptIsIncome() {
+        val sent=classify("支出","微信转账","张三","晚饭")
+        assertEquals(FlowType.EXPENSE,sent.flowType)
+        assertEquals("转账支出",sent.category)
+        val received=classify("收入","二维码收款","张三","收款成功")
+        assertEquals(FlowType.INCOME,received.flowType)
+        assertEquals("扫码收入",received.category)
     }
     @Test fun cardFundedQrStillCountsAsPurchaseNotCreditRepayment() {
         assertEquals(FlowType.EXPENSE,

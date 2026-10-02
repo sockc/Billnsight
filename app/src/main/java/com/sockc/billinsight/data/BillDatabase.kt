@@ -1126,11 +1126,17 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         val (start, end) = monthRange(month)
         val platformClause = if (platform == null) "" else " AND platform=?"
         val sql = """
-            SELECT category, SUM(amount_cent), COUNT(*)
+            SELECT category,
+                   SUM(amount_cent - COALESCE(
+                      (SELECT SUM(l.amount_cent) FROM transaction_links l
+                       WHERE l.expense_id=transactions.id),0)), COUNT(*)
             FROM transactions
             WHERE occurred_at >= ? AND occurred_at < ? AND flow_type IN ('EXPENSE','GIFT_EXPENSE')$platformClause
             GROUP BY category
-            ORDER BY SUM(amount_cent) DESC
+            HAVING SUM(amount_cent - COALESCE(
+                      (SELECT SUM(l.amount_cent) FROM transaction_links l
+                       WHERE l.expense_id=transactions.id),0)) > 0
+            ORDER BY 2 DESC
             LIMIT ?
         """.trimIndent()
         val args = mutableListOf(start.toString(), end.toString())
@@ -1433,7 +1439,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             totalTransactions=total, pendingTransactions=pending, unmatchedRefunds=unmatched,
             nonPositiveAmounts=amounts, directionMismatches=directions,
             duplicatePlatformOrderIds=repeated, brokenLinks=broken,
-            expenseDifferenceCent=summary.expenseCent-categorySum,
+            expenseDifferenceCent=summary.netExpenseCent-categorySum,
             databaseIntegrityOk=good,
             loanBreakdownInvalid=invalidLoanDetails,
             loanUnallocatedCount=unallocatedLoans

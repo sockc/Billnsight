@@ -72,7 +72,7 @@ fun AnalysisScreen(
                 }
             }
         }
-        item {SectionHeader("钱花哪了","支出分类与原始账单")}
+        item {SectionHeader("钱花哪了","已扣匹配退款，点击分类查看原始账单")}
         if(state.categories.isEmpty())
             item {EmptyFinanceCard("本月还没有消费或转账支出")}
         items(state.categories,key={it.category}) { category ->
