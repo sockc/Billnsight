@@ -91,12 +91,16 @@ object TransactionClassifier {
         // Outgoing payer statements may describe the payee's "二维码收款".
         // That does not turn our outgoing payment into incoming QR income.
         if ((qrPayment || qrReceipt) && outgoing) {
-            val rule = merchant.takeUnless(ScanPaymentClassifier::isGenericCounterparty)
+            val rule = merchant.takeUnless {
+                ScanPaymentClassifier.isGenericCounterparty(it) ||
+                MerchantLexicon.requiresProductEvidence(it)
+            }
                 ?.let { name -> merchantRules.entries.firstOrNull {
                     MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(name)
                 }?.value }
             return Classification(FlowType.EXPENSE,
-                rule?.takeUnless { it == "其他" } ?: MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
+                rule?.takeUnless { it == "其他" } ?: MerchantLexicon.suggest(merchant, description) ?:
+                    if(MerchantLexicon.requiresProductEvidence(merchant)) "其他" else categoryFor(all))
         }
         if (qrReceipt || kind.contains("二维码付款") || kind.contains("扫码支付")) {
             return Classification(FlowType.PENDING, "待确认")
@@ -120,13 +124,15 @@ object TransactionClassifier {
         if (flow != FlowType.EXPENSE) {
             return Classification(flow, if (flow == FlowType.INCOME) "收入" else "忽略")
         }
-        if (!ScanPaymentClassifier.isGenericCounterparty(merchant)) {
+        if (!ScanPaymentClassifier.isGenericCounterparty(merchant) &&
+            !MerchantLexicon.requiresProductEvidence(merchant)) {
             merchantRules.entries.firstOrNull {
                 MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(merchant)
             }?.value?.takeUnless { it == "其他" }?.let { return Classification(FlowType.EXPENSE, it) }
         }
         return Classification(FlowType.EXPENSE,
-            MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
+            MerchantLexicon.suggest(merchant, description) ?:
+                    if(MerchantLexicon.requiresProductEvidence(merchant)) "其他" else categoryFor(all))
     }
 
     private fun categoryFor(text: String): String = when {
