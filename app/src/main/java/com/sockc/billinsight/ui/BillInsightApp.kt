@@ -47,7 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.time.LocalDate
 import com.sockc.billinsight.BillInsightViewModel
-import com.sockc.billinsight.ui.screens.FinanceInstallmentScreen
+import com.sockc.billinsight.ui.screens.FinancialCenterScreen
 import com.sockc.billinsight.ui.screens.AnalysisScreen
 import com.sockc.billinsight.ui.screens.HomeScreen
 import com.sockc.billinsight.ui.screens.SettingsScreen
@@ -76,7 +76,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
             Destination("首页", Icons.Outlined.Home),
             Destination("流水", Icons.Outlined.ReceiptLong),
             Destination("分析", Icons.Outlined.BarChart),
-            Destination("金融分期", Icons.Outlined.AccountBalance),
+            Destination("金融中心", Icons.Outlined.AccountBalance),
             Destination("我的", Icons.Outlined.PersonOutline),
         )
     }
@@ -364,8 +364,18 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onPreviewExpenseCategory=viewModel::previewExpenseCategory,
                     onReclassify=viewModel::reclassifyOtherExpenses,
                 )
-                3 -> FinanceInstallmentScreen(
+                3 -> FinancialCenterScreen(
                     state=state,
+                    onYearChange=viewModel::setFinanceYear,
+                    onRecheck=viewModel::recheckFinancialHistory,
+                    onOpenCredit={
+                        viewModel.setHomeMonth(java.time.YearMonth.of(state.financeYear,12))
+                        detailPage="credit"
+                    },
+                    onOpenLoan={
+                        viewModel.setHomeMonth(java.time.YearMonth.of(state.financeYear,12))
+                        detailPage="loans"
+                    },
                     onSearchOrigins=viewModel::searchFinanceOrigins,
                     onCreate=viewModel::createInstallment,
                     onUpdate=viewModel::updateInstallment,

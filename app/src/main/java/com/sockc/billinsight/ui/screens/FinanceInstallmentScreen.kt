@@ -162,8 +162,11 @@ fun FinanceInstallmentScreen(
     onSearchLinks:(Long,FinanceLinkRole,String)->Unit,
     onLink:(Long,Long,FinanceLinkRole)->Unit,
     onUnlink:(Long,Long,FinanceLinkRole)->Unit,
+    initialKind:FinancePlanKind=FinancePlanKind.OWN,
+    showHeader:Boolean=true,
+    showKindFilter:Boolean=true,
 ) {
-    var kind by remember {mutableStateOf(FinancePlanKind.OWN)}
+    var kind by remember(initialKind) {mutableStateOf(initialKind)}
     var pickSource by remember {mutableStateOf(false)}
     var editingSource by remember {mutableStateOf<Transaction?>(null)}
     var editingPlan by remember {mutableStateOf<FinancePlan?>(null)}
@@ -324,7 +327,7 @@ fun FinanceInstallmentScreen(
     }
 
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(11.dp)) {
-        item {
+        if(showHeader)item {
             Row(Modifier.fillMaxWidth().padding(start=20.dp,end=16.dp,top=18.dp),
                 horizontalArrangement=Arrangement.SpaceBetween,
                 verticalAlignment=Alignment.CenterVertically) {
@@ -368,7 +371,7 @@ fun FinanceInstallmentScreen(
                 }
             }
         }
-        item {
+        if(showKindFilter)item {
             Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),
                 horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected=kind==FinancePlanKind.OWN,
