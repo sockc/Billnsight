@@ -924,6 +924,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     fun insertAll(items: List<Transaction>): Pair<Int, Int> {
         var inserted = 0
         var duplicate = 0
+        val classificationStore=CategoryWorkbenchStore(this)
         writableDatabase.beginTransaction()
         try {
             for (item in items) {
@@ -986,7 +987,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 } else {
                     inserted++
                     if(item.flowType==FlowType.EXPENSE)
-                        CategoryWorkbenchStore(this).rememberImportedEvidence(
+                        classificationStore.rememberImportedEvidence(
                             item.copy(id=id),item.category
                         )
                 }
