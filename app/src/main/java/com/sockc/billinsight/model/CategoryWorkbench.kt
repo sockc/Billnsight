@@ -7,6 +7,7 @@ data class CategoryReviewItem(
     val basis: String,
     val needsReview: Boolean,
     val manuallyEdited: Boolean,
+    val purposeWarning:String? = null,
 )
 
 data class CategoryReviewGroup(
