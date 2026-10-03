@@ -361,54 +361,25 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         )
     }
 
-    fun changeExpenseCategory(id: Long, category: String, scope: String): Int {
-        require(scope in setOf("SINGLE","MERCHANT","FUTURE"))
-        require(category in TransactionClassifier.categories)
-        val db=writableDatabase
-        db.beginTransaction()
-        try {
-            val selected=db.query("transactions",null,"id=?",
-                arrayOf(id.toString()),null,null,null
-            ).use { c -> if(c.moveToFirst()) c.toTransaction() else null }
-                ?: error("找不到这笔交易")
-            require(selected.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) {
-                "仅消费类交易可以修改商户消费分类"
-            }
-            val aliases=merchantAliases()
-            val groupKey=MerchantCategoryPolicy.key(selected,aliases)
-            require(scope=="SINGLE" || groupKey!=null) {
-                "商户信息不明确，请仅修改当前一笔"
-            }
-            var changed=0
-            if(scope!="FUTURE") {
-                changed+=db.update("transactions",ContentValues().apply {
-                    put("category",category)
-                    put("nature_modified",1)
-                },"id=?",arrayOf(selected.id.toString()))
-            }
-            if(scope!="SINGLE" && groupKey!=null) {
-                db.insertWithOnConflict(
-                    "platform_category_rules",null,ContentValues().apply {
-                        put("platform",selected.platform.name)
-                        put("merchant",selected.counterparty.trim())
-                        put("category",category)
-                        put("updated_at",System.currentTimeMillis())
-                    },SQLiteDatabase.CONFLICT_REPLACE
-                )
-                if(scope=="MERCHANT") {
-                    expenseMerchantMatches(db,selected)
-                        .filter { it.second }
-                        .forEach { (other,_) ->
-                            changed+=db.update("transactions",ContentValues().apply {
-                                put("category",category)
-                            },"id=?",arrayOf(other.id.toString()))
-                        }
-                }
-            }
-            db.setTransactionSuccessful()
-            return changed
-        } finally {db.endTransaction()}
-    }
+    fun changeExpenseCategory(id: Long, category: String, scope: String): Int =
+        CategoryWorkbenchStore(this).changeCategory(id,category,scope).changed
+
+    fun categoryReviewPreview(limit:Int=8000):AutoCategoryPreview =
+        CategoryWorkbenchStore(this).reviewPreview(limit)
+
+    fun pendingCategoryCount():Int=CategoryWorkbenchStore(this).pendingOtherCount()
+
+    fun applyCategoryReviewPreview(limit:Int=8000):CategoryChangeBatch =
+        CategoryWorkbenchStore(this).applyAutomaticPreview(limit)
+
+    fun categoryEvidence(items:List<Transaction>):Map<Long,String> =
+        CategoryWorkbenchStore(this).evidenceFor(items)
+
+    fun latestCategoryBatch():CategoryChangeBatch? =
+        CategoryWorkbenchStore(this).latestUndo()
+
+    fun undoLastCategoryBatch():Int =
+        CategoryWorkbenchStore(this).undoLatest()
 
     /**
      * Revisit only imported, unreviewed personal expenses left as "其他".
@@ -545,34 +516,43 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         previewExpenseCategory(tx.id).eligibleCount
 
     /** Import and existing ledger read the very same saved category. */
+    /** The same rule precedence is used for imports and later review. */
     fun applyPlatformCategoryRules(items: List<Transaction>): List<Transaction> {
-        val aliases=merchantAliases()
-        val rules=mutableMapOf<Pair<Platform,String>,String>()
+        val aliases=merchantAliases().mapKeys {MerchantCategoryPolicy.normalize(it.key)}
+        val platformRules=mutableMapOf<Pair<Platform,String>,String>()
         readableDatabase.rawQuery(
-            "SELECT platform,merchant,category FROM platform_category_rules ORDER BY updated_at DESC",
-            null
-        ).use { c ->
-            while(c.moveToNext()) {
-                val p=runCatching {Platform.valueOf(c.getString(0))}.getOrNull()
-                    ?: continue
-                val template=Transaction(
-                    platform=p,occurredAt=0,counterparty=c.getString(1),
-                    description="",directionText="支出",amountCent=1,
-                    flowType=FlowType.EXPENSE,category=c.getString(2),
-                    paymentMethod="",transactionId="",merchantOrderId="",
-                    sourceFile="导入",fingerprint=""
-                )
-                val key=MerchantCategoryPolicy.key(template,aliases)
-                if(key!=null && key !in rules) rules[key]=c.getString(2)
-            }
-        }
-        if(rules.isEmpty()) return items
-        return items.map { tx ->
-            val key=MerchantCategoryPolicy.key(tx,aliases)
-            val category=key?.let { rules[it] }
-            // "其他" is an unresolved placeholder, not a definitive override
-            // of a new, specific offline merchant classification.
-            if(category!=null && category!="其他") tx.copy(category=category) else tx
+            "SELECT platform,merchant,category FROM platform_category_rules",null
+        ).use {c->while(c.moveToNext()){
+            val p=runCatching{Platform.valueOf(c.getString(0))}.getOrNull()
+                ?: continue
+            val raw=MerchantCategoryPolicy.normalize(c.getString(1))
+            val identity=MerchantCategoryPolicy.normalize(aliases[raw]?:raw)
+            platformRules[p to identity]=c.getString(2)
+        }}
+        val cross=mutableMapOf<String,String>()
+        readableDatabase.rawQuery(
+            "SELECT merchant,category FROM cross_platform_category_rules",null
+        ).use {c->while(c.moveToNext())cross[c.getString(0)]=c.getString(1)}
+        val product=mutableMapOf<Triple<Platform,String,String>,String>()
+        readableDatabase.rawQuery(
+            "SELECT platform,merchant,product,category FROM product_category_rules",null
+        ).use {c->while(c.moveToNext()){
+            val p=runCatching{Platform.valueOf(c.getString(0))}.getOrNull()
+                ?: continue
+            product[Triple(p,c.getString(1),c.getString(2))]=c.getString(3)
+        }}
+        return items.map {tx->
+            if(tx.flowType!=FlowType.EXPENSE)return@map tx
+            val raw=MerchantCategoryPolicy.normalize(tx.counterparty)
+            val canonical=MerchantCategoryPolicy.normalize(aliases[raw]?:raw)
+            val mixed=CategoryWorkbenchPolicy.isMixedMerchant(tx.counterparty)
+            val productKey=Triple(tx.platform,canonical,
+                com.sockc.billinsight.importer.MerchantLexicon.normalize(tx.description))
+            val cat=product[productKey] ?: if(mixed)null else (
+                if(tx.platform in setOf(Platform.WECHAT,Platform.ALIPAY))
+                    cross[canonical] else null
+            ) ?: if(mixed)null else platformRules[tx.platform to canonical]
+            if(cat!=null && cat!="其他")tx.copy(category=cat) else tx
         }
     }
 
@@ -1002,6 +982,10 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     // Credit defaults are repaired in one batch after importing.
                 } else {
                     inserted++
+                    if(item.flowType==FlowType.EXPENSE)
+                        CategoryWorkbenchStore(this).rememberImportedEvidence(
+                            item.copy(id=id),item.category
+                        )
                 }
             }
             if (items.any { it.flowType == FlowType.CREDIT_REPAYMENT }) {
