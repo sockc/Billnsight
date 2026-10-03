@@ -542,7 +542,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                                 transaction.flowType==FlowType.EXPENSE)
                                 "（仅此交易，可撤销）"
                             else "（仅此交易）"
-                    }
+                    },
                     onFailure={ it.message?:"分类保存失败" }
                 )
             )
