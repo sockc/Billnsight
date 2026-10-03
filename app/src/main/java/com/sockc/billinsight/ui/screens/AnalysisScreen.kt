@@ -241,6 +241,12 @@ fun AnalysisScreen(
                     }
                 }
             }
+            item {
+                OutlinedButton(onClick=onOpenTrends,
+                    modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp)){
+                    Text("查看消费趋势 ›")
+                }
+            }
         } else if(section=="INCOME") {
             item {OverviewAmountCard("本期收入",state.homeSummary.incomeCent,
                 "按付款人汇总；普通转账收入只在这里计算一次")}
