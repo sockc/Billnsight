@@ -88,7 +88,10 @@ object MerchantLexicon {
         val name=normalize(merchant)
         return mixedPlatforms.any {platform->
             val token=normalize(platform)
-            if(token.isBlank()) raw.contains(platform.lowercase(Locale.ROOT))
+            // Prefixes such as "微信支付-武汉热干面" still contain a real
+            // restaurant after the prefix is removed; do not hide that evidence.
+            if(token.isBlank()) name.isBlank() &&
+                raw.contains(platform.lowercase(Locale.ROOT))
             else name.contains(token)
         } || paymentProcessors.any {processor->
             // Do not turn short generic words such as "支付" into a global match.
