@@ -113,7 +113,7 @@ fun DateScopeTitle(title:String,subtitle:String,state:BillUiState,
                 onSelectPeriod("DAY",day,day);opened=false
             }else if(rangeStart==null || day.isBefore(rangeStart)){
                 rangeStart=day
-                picker.setSelection(null)
+                picker.selectedDateMillis=null
             }else{
                 onSelectPeriod("CUSTOM",rangeStart,day);opened=false
             }
@@ -131,7 +131,7 @@ fun DateScopeTitle(title:String,subtitle:String,state:BillUiState,
                     listOf("MONTH" to "月份","DAY" to "单日","YEAR" to "全年",
                         "CUSTOM" to "日期范围","ALL_HISTORY" to "全部日期").forEach{(key,display)->
                         FilterChip(selected=mode==key,onClick={
-                            mode=key;rangeStart=null;picker.setSelection(null)
+                            mode=key;rangeStart=null;picker.selectedDateMillis=null
                             if(key=="ALL_HISTORY"){
                                 onSelectPeriod("ALL_HISTORY",null,null);opened=false
                             }
@@ -186,7 +186,7 @@ fun DateScopeTitle(title:String,subtitle:String,state:BillUiState,
                         style=MaterialTheme.typography.labelSmall)
                     DatePicker(state=picker,showModeToggle=false)
                     if(mode=="CUSTOM" && rangeStart!=null)
-                        TextButton(onClick={rangeStart=null;picker.setSelection(null)}){
+                        TextButton(onClick={rangeStart=null;picker.selectedDateMillis=null}){
                             Text("重新选择开始日期")
                         }
                 }
