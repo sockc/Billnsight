@@ -14,7 +14,16 @@ fun parseAmountToCent(raw: String): Long {
         .replace("￥", "")
         .replace(",", "")
         .replace("元", "")
-        .trim()
+        .replace("−", "-")
+        .replace("－", "-")
+        .replace("﹣", "-")
+        .replace(" ", "")
+        .replace("\u00a0", "")
+        .trim().let { value ->
+            if(value.length>2 && value.startsWith("(") && value.endsWith(")"))
+                "-"+value.substring(1,value.length-1)
+            else value
+        }
     if (cleaned.isBlank()) return 0L
     return runCatching {
         BigDecimal(cleaned).setScale(2, RoundingMode.HALF_UP)

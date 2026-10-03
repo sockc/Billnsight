@@ -53,7 +53,10 @@ data class ImportPreview(
 ) {
     val total: Int get() = transactions.size
     val canCommit: Boolean get() = total > 0 && platform != Platform.UNKNOWN &&
-        invalidAmountCount == 0 && invalidTimeCount == 0
+        invalidTimeCount == 0
+    val requiresAmountConfirmation: Boolean get() = invalidAmountCount > 0
+    val invalidAmountSamples: List<Transaction> get() =
+        transactions.filter { it.amountCent<=0L }.take(12)
     val samples: List<Transaction> get() = transactions.take(12)
 }
 

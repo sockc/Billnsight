@@ -55,7 +55,7 @@ fun ImportPreviewDialog(
                 Text("日期无法解析："+preview.invalidTimeCount+" 笔",
                     color=if(preview.invalidTimeCount>0) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurface)
-                Text("异常金额："+preview.invalidAmountCount+" 笔",
+                Text("金额待核对："+preview.invalidAmountCount+" 笔",
                     color=if(preview.invalidAmountCount>0)
                         MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurface)
@@ -65,11 +65,27 @@ fun ImportPreviewDialog(
                             "无法确定微信或支付宝账单来源，请重新选择正确文件。"
                         else if(preview.invalidTimeCount>0)
                             "部分交易日期无法解析。为避免把旧账错误计为今天，请核对源文件日期格式。"
-                        else if(preview.invalidAmountCount>0)
-                            "检测到未忽略的零金额或负金额记录。为避免污染统计，本次不允许直接导入，请修正源文件。"
                         else "当前文件没有有效交易。",
                         color=MaterialTheme.colorScheme.error
                     )
+                }
+                if(preview.requiresAmountConfirmation && preview.canCommit) {
+                    Text(
+                        "不会修改源文件或忽略异常记录。确认后全部导入；" +
+                            "零金额、无法解析及方向不明的负金额将在“流水 → 需核对”保留，" +
+                            "核对前不参与收支统计。",
+                        color=MaterialTheme.colorScheme.error
+                    )
+                    SectionHeader("异常金额样例","最多展示 12 笔；全部都会保留")
+                    preview.invalidAmountSamples.forEach { row ->
+                        androidx.compose.material3.HorizontalDivider()
+                        Text(row.counterparty.ifBlank{"未知交易对方"}+" · "+
+                            row.amountCent.toYuanText(),
+                            color=MaterialTheme.colorScheme.error)
+                        Text(row.description,
+                            style=MaterialTheme.typography.bodySmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 SectionHeader("流水样例","仅展示前 12 笔；确认前不会写入数据库")
                 preview.samples.forEach { row ->
@@ -92,7 +108,10 @@ fun ImportPreviewDialog(
         },
         confirmButton={
             Button(onClick=onConfirm,enabled=preview.canCommit&&!loading) {
-                Text(if(loading) "正在保存…" else "确认导入 "+preview.newCount+" 笔")
+                Text(if(loading) "正在保存…" else
+                    if(preview.requiresAmountConfirmation)
+                        "确认全部导入 "+preview.newCount+" 笔"
+                    else "确认导入 "+preview.newCount+" 笔")
             }
         },
         dismissButton={

@@ -347,6 +347,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     platformFilter = state.platformFilter,
                     onPlatformChange = viewModel::setPlatformFilter,
                     onNatureChange = viewModel::updateNature,
+                    onCorrectAmount = viewModel::correctImportedAmount,
                     loanDetails = state.loanDetails,
                     onSaveLoan = viewModel::saveLoanDetail,
                     onClearLoan = viewModel::clearLoanDetail,

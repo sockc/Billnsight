@@ -5,6 +5,7 @@ import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ImportReviewTest {
@@ -24,12 +25,19 @@ class ImportReviewTest {
         assertEquals(2,p.duplicateCount)
         assertEquals(3,p.total)
     }
-    @Test fun invalidAmountsRequireCorrectionBeforeImport() {
+    @Test fun invalidAmountsWaitForExplicitAllRecordsConfirmation() {
         val p=ImportReview.preview(
-            BillImporter.ParsedBill("bad.csv",Platform.WECHAT,listOf(row("bad",0))),emptySet()
+            BillImporter.ParsedBill("bad.csv",Platform.WECHAT,listOf(
+                row("zero",0).copy(flowType=FlowType.PENDING,category="金额待核对"),
+                row("negative",-120).copy(flowType=FlowType.PENDING,category="金额待核对"),
+                row("normal",500)
+            )),emptySet()
         )
-        assertFalse(p.canCommit)
-        assertEquals(1,p.invalidAmountCount)
+        assertTrue(p.canCommit)
+        assertTrue(p.requiresAmountConfirmation)
+        assertEquals(2,p.invalidAmountCount)
+        assertEquals(2,p.invalidAmountSamples.size)
+        assertEquals(3,p.newCount)
     }
     @Test fun invalidDateBlocksImportInsteadOfTurningIntoToday() {
         val invalid=row("bad-date").copy(occurredAt=0L)
