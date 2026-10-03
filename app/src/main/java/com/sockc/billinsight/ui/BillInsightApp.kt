@@ -408,6 +408,8 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                         viewModel.openFinanceInstallments()
                     },
                     onOpenTrends={detailPage="trends"},
+                    onOpenTransfer=viewModel::openPersonTransfer,
+                    onConfirmMerge=viewModel::confirmSameCounterparty,
                 )
                 3 -> FinancialCenterScreen(
                     state=state,
