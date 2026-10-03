@@ -25,6 +25,10 @@ object CategoryWorkbenchPolicy {
         crossPlatformRules: Map<String,String> = emptyMap(),
         productRules: Map<Triple<Platform,String,String>,String> = emptyMap(),
     ): CategoryReviewItem {
+        if(tx.flowType==FlowType.PENDING) return CategoryReviewItem(
+            tx,null,"","交易用途尚未确认，请先在原始流水确认收入、消费、还款或转账",
+            true,manuallyEdited,"交易用途待确认"
+        )
         if(tx.flowType!=FlowType.EXPENSE) return CategoryReviewItem(
             tx,null,"","非个人消费",false,manuallyEdited
         )
