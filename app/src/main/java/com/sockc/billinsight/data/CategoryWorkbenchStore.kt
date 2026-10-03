@@ -391,7 +391,8 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
                     result[id]=when {
                         manual -> "你已手动确认：${tx.category}"
                         stored!=null ->stored+
-                            if(term.isBlank())"" else " · 匹配到：$term"
+                            if(term.isBlank() || stored.contains("匹配到"))""
+                            else " · 匹配到：$term"
                         else ->evaluate(tx,false,r).basis
                     }
                 }
