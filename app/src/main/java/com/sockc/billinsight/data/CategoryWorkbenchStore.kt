@@ -117,6 +117,34 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
         )
     }
 
+    /** Counts only rows the specific manual scope can actually update. */
+    fun scopeCounts(selected:Transaction):Pair<Int,Int> {
+        val r=rules()
+        val raw=MerchantCategoryPolicy.normalize(selected.counterparty)
+        val canonical=MerchantCategoryPolicy.normalize(r.aliases[raw]?:raw)
+        var cross=0
+        var product=0
+        val wantedProduct=MerchantLexicon.normalize(selected.description)
+        db.query("transactions",null,
+            "flow_type='EXPENSE' AND id<>?",
+            arrayOf(selected.id.toString()),null,null,null
+        ).use {c->while(c.moveToNext()){
+            val tx=c.tx()
+            val manual=c.getInt(c.getColumnIndexOrThrow("nature_modified"))!=0
+            if(manual && tx.category!="其他")continue
+            val other=MerchantCategoryPolicy.normalize(tx.counterparty)
+            val identity=MerchantCategoryPolicy.normalize(r.aliases[other]?:other)
+            if(identity!=canonical)continue
+            if(tx.platform in setOf(Platform.WECHAT,Platform.ALIPAY) &&
+                !CategoryWorkbenchPolicy.isMixedMerchant(tx.counterparty) &&
+                !CategoryWorkbenchPolicy.isMixedMerchant(selected.counterparty))cross++
+            if(tx.platform==selected.platform &&
+                MerchantLexicon.normalize(tx.description)==wantedProduct &&
+                wantedProduct.isNotBlank())product++
+        }}
+        return cross to product
+    }
+
     fun pendingOtherCount():Int =
         db.rawQuery(
             "SELECT COUNT(*) FROM transactions WHERE flow_type='EXPENSE' AND category='其他'",
