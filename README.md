@@ -307,3 +307,29 @@ Release 工作流在构建后使用 `apksigner` 再次校验 APK，证书指纹�
 - SQLite 从 V5 非破坏性升级到 V6，新建贷款拆分表。仅对仍是默认「资金流转」、且原始交易类型明确含贷款还款的历史记录执行自动迁移；其他旧记录可逐笔修改性质，避免误改人工分类。
 - AES-256 `.bia` 备份包含 V6 的拆分记录。升级前建议导出已有账本并保留原始微信/支付宝账单。
 
+
+## V0.2.7 · Offline merchant classification
+
+- Bundled local dictionary: roughly 800 distinct common merchant names, brands and
+  spending keywords covering food, neighbourhood supermarkets, charging, tolls,
+  phone bills and other daily purchases; no network request required.
+- Classification order: repayment/refund/transfer nature first, then saved merchant
+  rules, then specific merchant terms and descriptive purchase hints. A shared
+  brand category never merges unrelated merchants: use explicit aliases for that.
+- In **分析 → 消费分类排行 → 其他** or **我的 → 分类与规则**, confirm
+  **重新识别已有其他消费** to revisit imported, unreviewed personal purchases.
+  Manually confirmed categories and all repayment/transfer records are preserved.
+- The dictionary is deliberately conservative: ambiguous person-to-person QR
+  payments remain uncategorized until the user confirms their nature or category.
+  Corrections are reused through existing source-aware merchant rules.
+- Future word-list updates can be reviewed in `MerchantLexicon.kt`.
+
+## V0.3.0 · 稳定基线重建
+
+本版以可以正常启动的 **V0.2.6 Git 树** 为基础，仅加入离线商户识别与金融分期两组功能；其余账本功能保持原来的使用方式。金融分期改为进入对应页面时才加载和关联历史记录，不在首页启动时自动处理。
+
+- 旧账本兼容：数据库版本保留为 **13**，兼容从 V0.2.6（DB 12）迁移，也能直接覆盖已有 DB 13 的 V0.2.8/0.2.9。**不要直接安装低版本 APK 或清除 APP 数据**。
+- 商户识别：内置常用商家、餐饮及便民店词库。重新识别历史「其他」账单时，默认保护人工分类，可选择重新检查曾人工标记为「其他」的导入账单。
+- 金融分期：从原始导入账单创建本人或代付分期卡片，仅关联已确认的还款和回款，不改写原始交易。需要时打开金融分期页面加载。
+- 回归验证：GitHub CI 除单元测试和 APK 编译外，还会在 Android 模拟器中安装 V0.2.6、插入测试账单，再覆盖升级重建版验证数据保留。
+
