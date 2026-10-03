@@ -17,8 +17,13 @@ import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.importer.CreditRepaymentDetector
 import com.sockc.billinsight.importer.FinancialTransactionDetector
 import com.sockc.billinsight.importer.ScanPaymentClassifier
+import com.sockc.billinsight.importer.CategoryWorkbenchPolicy
 import com.sockc.billinsight.importer.MerchantCategoryPolicy
 import com.sockc.billinsight.model.CategoryEditPreview
+import com.sockc.billinsight.model.CategoryReviewGroup
+import com.sockc.billinsight.model.CategoryReviewItem
+import com.sockc.billinsight.model.AutoCategoryPreview
+import com.sockc.billinsight.model.CategoryChangeBatch
 import com.sockc.billinsight.importer.StrongDuplicateKey
 import com.sockc.billinsight.importer.TransactionClassifier
 import com.sockc.billinsight.importer.MerchantNatureRule
@@ -77,6 +82,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         createMerchantNatureRulesTable(db)
         createPlatformCategoryRulesTable(db)
         createInstallmentTables(db)
+        createClassificationTables(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -195,6 +201,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
         if (oldVersion < 12) createPlatformCategoryRulesTable(db)
         if (oldVersion < 13) createInstallmentTables(db)
+        if (oldVersion < 14) createClassificationTables(db)
     }
 
     private fun createInstallmentTables(db: SQLiteDatabase) {
@@ -232,6 +239,69 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             "ON finance_installment_plans(platform,plan_reference)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_finance_links_plan " +
             "ON finance_installment_links(plan_id,role)")
+    }
+
+    /** Additive migration: never overwrite original imported transactions. */
+    private fun createClassificationTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS classification_evidence (
+                transaction_id INTEGER PRIMARY KEY,
+                normalized_merchant TEXT NOT NULL,
+                matched_term TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                applied_category TEXT NOT NULL,
+                needs_review INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY(transaction_id) REFERENCES transactions(id)
+            )""".trimIndent()
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS category_change_batches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL,
+                changed_at INTEGER NOT NULL,
+                undone_at INTEGER
+            )""".trimIndent()
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS category_change_items (
+                batch_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                before_category TEXT NOT NULL,
+                before_modified INTEGER NOT NULL,
+                after_category TEXT NOT NULL,
+                after_modified INTEGER NOT NULL,
+                PRIMARY KEY(batch_id,transaction_id)
+            )""".trimIndent()
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS category_rule_changes (
+                batch_id INTEGER NOT NULL,
+                rule_type TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                merchant TEXT NOT NULL,
+                before_category TEXT,
+                after_category TEXT NOT NULL,
+                PRIMARY KEY(batch_id,rule_type,platform,merchant)
+            )""".trimIndent()
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS cross_platform_category_rules (
+                merchant TEXT PRIMARY KEY,
+                category TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )""".trimIndent()
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS product_category_rules (
+                platform TEXT NOT NULL,
+                merchant TEXT NOT NULL,
+                product TEXT NOT NULL,
+                category TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(platform,merchant,product)
+            )""".trimIndent()
+        )
     }
 
     private fun createPlatformCategoryRulesTable(db: SQLiteDatabase) {
@@ -2734,6 +2804,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 13
+        private const val DB_VERSION = 14
     }
 }
