@@ -64,6 +64,14 @@ class CategoryWorkbenchPolicyTest {
         assertEquals("餐饮",result.proposedCategory)
         assertTrue(result.basis.contains("你保存"))
     }
+    @Test fun unconfirmedPurposeIsListedButNeverAutomaticallyCategorized() {
+        val pending=expense("张三","扫码支付").copy(
+            flowType=FlowType.PENDING,category="待确认")
+        val review=check(pending)
+        assertTrue(review.needsReview)
+        assertNotNull(review.purposeWarning)
+        assertNull(review.proposedCategory)
+    }
     @Test fun oldShoppingLabelOnCardRepaymentRequiresPurposeReview() {
         val tx=expense("招商银行信用卡","信用卡还款",category="购物")
         val review=check(tx)
