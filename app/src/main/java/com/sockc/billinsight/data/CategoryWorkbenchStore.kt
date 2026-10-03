@@ -42,7 +42,9 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
         val cross:Map<String,String>,
         val product:Map<Triple<Platform,String,String>,String>
     )
+    private var cachedRules:Rules?=null
     private fun rules(): Rules {
+        cachedRules?.let {return it}
         val aliases=helper.merchantAliases()
             .mapKeys {MerchantCategoryPolicy.normalize(it.key)}
         val generic=helper.merchantRules()
@@ -67,6 +69,7 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
                 if(platform!=null) product[Triple(platform,c.getString(1),c.getString(2))]=c.getString(3)
             }}
         return Rules(aliases,generic,perPlatform,cross,product)
+            .also {cachedRules=it}
     }
     private fun evaluate(
         tx:Transaction,manuallyEdited:Boolean,r:Rules
@@ -78,12 +81,15 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
         db.query("transactions",null,
             "flow_type='EXPENSE' AND source_file NOT LIKE '手动%'",
             null,null,null,"occurred_at DESC,id DESC",
-            limit.coerceIn(1,50000).toString()
+            limit.coerceIn(1,100000).toString()
         ).use {c->buildList {while(c.moveToNext()) {
             add(c.tx() to (c.getInt(c.getColumnIndexOrThrow("nature_modified"))!=0))
         }}}
 
     fun reviewPreview(limit:Int=8000):AutoCategoryPreview {
+        val total=db.rawQuery(
+            "SELECT COUNT(*) FROM transactions WHERE flow_type='EXPENSE' AND source_file NOT LIKE '手动%'",null
+        ).use {c->c.moveToFirst();c.getInt(0)}
         val rows=sourceTransactions(limit)
         val r=rules()
         val evaluated=rows.map {(tx,manual)->evaluate(tx,manual,r)}
@@ -108,6 +114,7 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
             .thenBy{it.label})
         return AutoCategoryPreview(
             scanned=rows.size,
+            totalImported=total,
             proposed=evaluated.count {!it.manuallyEdited &&
                 it.proposedCategory!=null &&
                 it.proposedCategory!=it.transaction.category},
