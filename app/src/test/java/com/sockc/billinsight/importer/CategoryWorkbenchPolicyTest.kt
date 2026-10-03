@@ -59,6 +59,19 @@ class CategoryWorkbenchPolicyTest {
         assertEquals("餐饮",result.proposedCategory)
         assertTrue(result.basis.contains("你保存"))
     }
+    @Test fun oldShoppingLabelOnCardRepaymentRequiresPurposeReview() {
+        val tx=expense("招商银行信用卡","信用卡还款",category="购物")
+        val review=check(tx)
+        assertNull(review.proposedCategory)
+        assertNotNull(review.purposeWarning)
+        assertTrue(review.needsReview)
+    }
+    @Test fun ordinaryRestaurantDoesNotNeedPurposeRecheck() {
+        val tx=expense("隆江猪脚饭","扫码支付",category="餐饮")
+        val review=check(tx)
+        assertNull(review.purposeWarning)
+    }
+
     @Test fun marketMerchantIdentityIsNotTrustedByPlatformLabel() {
         assertTrue(CategoryWorkbenchPolicy.isMixedMerchant("京东商城"))
         assertTrue(CategoryWorkbenchPolicy.isMixedMerchant("财付通支付科技有限公司"))
