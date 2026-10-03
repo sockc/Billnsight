@@ -9,6 +9,26 @@ show_crash() {
 }
 trap 'result=$?; if [ "$result" -ne 0 ]; then show_crash; fi' EXIT
 
+# Validate visible home screen, not merely that the process remains running.
+check_home_screen() {
+  local label="$1"
+  adb shell uiautomator dump /sdcard/billinsight-ui.xml >/dev/null
+  adb exec-out cat /sdcard/billinsight-ui.xml > /tmp/billinsight-ui.xml
+  if grep -Eq '账本读取失败|账本初始化失败|SQLiteException|SQLITE_ERROR' /tmp/billinsight-ui.xml; then
+    echo "FAIL: $label displayed the ledger error screen"
+    grep -o -E '.{0,100}(账本读取失败|账本初始化失败|SQLiteException|SQLITE_ERROR).{0,100}' /tmp/billinsight-ui.xml || true
+    return 1
+  fi
+  if ! grep -Eq 'BillInsight|所选期间总支出' /tmp/billinsight-ui.xml; then
+    echo "FAIL: $label did not render the dashboard"
+    head -c 1300 /tmp/billinsight-ui.xml || true
+    return 1
+  fi
+  echo "PASS: $label renders dashboard without SQLite errors"
+}
+
+
+
 gradle --no-daemon :app:assembleDebug
 git worktree add --detach "$BASE" v0.2.6
 (cd "$BASE" && gradle --no-daemon :app:assembleDebug)
@@ -17,6 +37,7 @@ adb logcat -c
 adb shell am start -W -n "$APP/.MainActivity"
 sleep 7
 adb shell pidof "$APP"
+check_home_screen "original V0.2.6"
 adb shell am force-stop "$APP"
 
 # Capture the real V0.2.6 SQLite schema from its own initial startup.
@@ -46,6 +67,7 @@ adb logcat -c
 adb shell am start -W -n "$APP/.MainActivity"
 sleep 9
 adb shell pidof "$APP"
+check_home_screen "upgraded V0.3.1"
 adb shell am force-stop "$APP"
 adb exec-out run-as "$APP" cat databases/bill_insight.db > /tmp/ledger-v13.db
 if adb shell run-as "$APP" test -s databases/bill_insight.db-wal; then
@@ -63,3 +85,13 @@ assert {"finance_installment_plans","finance_installment_links"}<=tables, tables
 print("PASS: V0.2.6 -> V0.3.0 Android boot; migration retained original ledger")
 db.close()
 PY
+
+# Verify a completely empty/cleared database also launches to the dashboard.
+# This only clears data on the disposable CI emulator, never the user's phone.
+adb shell pm clear "$APP"
+adb logcat -c
+adb shell am start -W -n "$APP/.MainActivity"
+sleep 7
+adb shell pidof "$APP"
+check_home_screen "fresh install / cleared app data"
+echo "PASS: empty database startup is safe"
