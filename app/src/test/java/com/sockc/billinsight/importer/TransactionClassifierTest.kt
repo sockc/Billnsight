@@ -5,6 +5,25 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class TransactionClassifierTest {
+    @Test fun newlyRecognizedMerchantsAndItemDetailsWorkAtImport() {
+        listOf(
+            Triple("缤纷生鲜汇","二维码收款","商超日用"),
+            Triple("粤吃越湘","二维码收款","餐饮"),
+            Triple("叹茶靓点（庆丰店）","美团收银订单","餐饮"),
+            Triple("长壮**司","家具三合一连接件柜","购物")
+        ).forEach { (merchant,description,category) ->
+            val tx=TransactionClassifier.classify("支出","商户消费",
+                merchant,description,"成功",emptyMap())
+            assertEquals(merchant,com.sockc.billinsight.model.FlowType.EXPENSE,tx.flowType)
+            assertEquals(merchant,category,tx.category)
+        }
+    }
+    @Test fun oldOtherRuleNoLongerMasksStrongDictionaryMatch() {
+        val tx=TransactionClassifier.classify("支出","二维码付款","粤吃越湘",
+            "二维码付款","成功",mapOf("粤吃越湘" to "其他"))
+        assertEquals("餐饮",tx.category)
+    }
+
     @Test fun phoneTopUpIsRealExpense() {
         val result = TransactionClassifier.classify(
             "支出", "手机充值", "中国联合网络通信有限公司",

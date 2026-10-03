@@ -91,7 +91,7 @@ object TransactionClassifier {
                     MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(name)
                 }?.value }
             return Classification(FlowType.EXPENSE,
-                rule ?: MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
+                rule?.takeUnless { it == "其他" } ?: MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
         }
         if (qrReceipt || kind.contains("二维码付款") || kind.contains("扫码支付")) {
             return Classification(FlowType.PENDING, "待确认")
@@ -118,7 +118,7 @@ object TransactionClassifier {
         if (!ScanPaymentClassifier.isGenericCounterparty(merchant)) {
             merchantRules.entries.firstOrNull {
                 MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(merchant)
-            }?.value?.let { return Classification(FlowType.EXPENSE, it) }
+            }?.value?.takeUnless { it == "其他" }?.let { return Classification(FlowType.EXPENSE, it) }
         }
         return Classification(FlowType.EXPENSE,
             MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))

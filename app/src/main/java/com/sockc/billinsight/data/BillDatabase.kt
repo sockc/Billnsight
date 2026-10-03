@@ -499,7 +499,9 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         return items.map { tx ->
             val key=MerchantCategoryPolicy.key(tx,aliases)
             val category=key?.let { rules[it] }
-            if(category!=null) tx.copy(category=category) else tx
+            // "其他" is an unresolved placeholder, not a definitive override
+            // of a new, specific offline merchant classification.
+            if(category!=null && category!="其他") tx.copy(category=category) else tx
         }
     }
 
@@ -2110,11 +2112,12 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         if(rules.isEmpty()) return rows
         return rows.map { tx ->
             val direction=MerchantNaturePolicy.direction(tx.directionText)
-            MerchantNaturePolicy.apply(tx,
-                direction?.let {
-                    rules[Triple(tx.platform,tx.counterparty.trim(),it)]
-                }
-            )
+            val rule=direction?.let {
+                rules[Triple(tx.platform,tx.counterparty.trim(),it)]
+            }
+            if(rule?.category=="其他" && rule.flowType==tx.flowType &&
+                tx.category!="其他") tx
+            else MerchantNaturePolicy.apply(tx,rule)
         }
     }
 
