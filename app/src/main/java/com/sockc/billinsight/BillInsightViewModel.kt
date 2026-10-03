@@ -434,6 +434,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                             startAt=preview.startAt,endAt=preview.endAt,
                             qrExpenseCount=preview.qrExpenseCount,
                             qrMerchantReviewCount=preview.qrMerchantReviewCount,
+                            autoClassified=db.lastImportAutoClassified,
+                            pendingOrganize=db.lastImportPendingOrganize,
                         )
                     }
                 }
@@ -443,7 +445,9 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 pendingParsedBill=null
                 _uiState.value=_uiState.value.copy(
                     isLoading=false,importPreview=null,lastImportResult=result,
-                    message="导入完成：新增 "+result.inserted+" 笔，重复 "+
+                    message="导入完成：新增 "+result.inserted+" 笔，其中自动分类 "+
+                        result.autoClassified+" 笔个人消费，待整理 "+
+                        result.pendingOrganize+" 笔；重复 "+
                         result.duplicated+" 笔"
                 )
                 refresh()
