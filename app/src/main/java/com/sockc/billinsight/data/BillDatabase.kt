@@ -2503,7 +2503,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             WHERE t.occurred_at>=? AND t.occurred_at<?$filter
               AND t.flow_type IN ('EXPENSE','INCOME')
             GROUP BY $personGroupSql
-            ORDER BY 4+5 DESC""",args).use {c->
+            ORDER BY SUM(t.amount_cent) DESC""",args).use {c->
             buildList {while(c.moveToNext()) add(TransferPerson(
                 c.getString(0),c.getString(1),c.getString(2) ?: "",
                 c.getLong(3),c.getLong(4),c.getInt(5),c.getInt(6)
