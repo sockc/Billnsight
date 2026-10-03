@@ -114,7 +114,10 @@ assert version==14, f"Expected upgraded schema v14, got {version}"
 row=db.execute("SELECT counterparty,amount_cent,category FROM transactions WHERE fingerprint='ci-smoke-fingerprint'").fetchone()
 assert row==("拾贰便利店",1200,"其他"), f"Original imported ledger changed or missing: {row}"
 tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-assert {"finance_installment_plans","finance_installment_links",\n        "classification_evidence","category_change_batches",\n        "category_change_items","category_rule_changes",\n        "cross_platform_category_rules","product_category_rules"}<=tables, tables
+assert {"finance_installment_plans","finance_installment_links",
+        "classification_evidence","category_change_batches",
+        "category_change_items","category_rule_changes",
+        "cross_platform_category_rules","product_category_rules"}<=tables, tables
 print("PASS: V0.2.6 -> V0.3.5 Android boot; v14 migration retained original ledger")
 db.close()
 PY
