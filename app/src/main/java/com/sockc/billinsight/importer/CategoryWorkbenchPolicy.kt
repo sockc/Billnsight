@@ -41,11 +41,12 @@ object CategoryWorkbenchPolicy {
             ?.takeUnless {it=="其他"}
         val hit=MerchantLexicon.explain(tx.counterparty,tx.description)
         val proposal=saved ?: hit?.category?.takeUnless {it=="其他"}
-        val term=if(saved!=null) tx.counterparty else hit?.matchedTerm.orEmpty()
+        val term=hit?.matchedTerm?.takeIf {it.isNotBlank()} ?:
+            if(saved!=null) tx.counterparty else ""
         val basis=when {
             manuallyEdited -> "使用你已确认的消费分类"
-            product!=null -> "使用你保存的商品分类"
-            saved!=null -> "使用你保存的商户分类"
+            product!=null -> "使用你保存的商品分类 · 匹配到："+term
+            saved!=null -> "使用你保存的商户分类 · 匹配到："+term
             hit?.conflict==true -> "发现多个类别冲突，需核对：" + term
             hit!=null -> "匹配到：" + term + " · " + hit.source
             mixed -> "综合平台或支付服务商，缺少明确商品描述"
