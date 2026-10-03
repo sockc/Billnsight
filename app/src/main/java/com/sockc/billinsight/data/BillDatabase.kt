@@ -354,10 +354,13 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }.distinct().count {
             it!=MerchantCategoryPolicy.normalize(selected.counterparty)
         }
+        val (cross,product)=CategoryWorkbenchStore(this).scopeCounts(selected)
         return CategoryEditPreview(
             eligibleCount=matches.count { it.second },
             protectedCount=matches.count { !it.second },
-            variantCount=distinctNames
+            variantCount=distinctNames,
+            crossEligibleCount=cross,
+            productEligibleCount=product
         )
     }
 
