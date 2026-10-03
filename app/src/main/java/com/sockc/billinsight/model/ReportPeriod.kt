@@ -17,10 +17,14 @@ object ReportPeriod {
             it.atDay(1) to it.atEndOfMonth()
         }
         "LAST_7" -> today.minusDays(6) to today
-        "YEAR" -> LocalDate.of(today.year,1,1) to today
+        "YEAR" -> LocalDate.of(month.year,1,1) to LocalDate.of(month.year,12,31)
+        "DAY" -> {
+            require(customStart!=null)
+            customStart to customStart
+        }
         "LAST_YEAR" -> LocalDate.of(today.year-1,1,1) to
             LocalDate.of(today.year-1,12,31)
-        "ALL_HISTORY" -> LocalDate.of(1900,1,1) to LocalDate.of(2100,12,31)
+        "ALL_HISTORY" -> LocalDate.of(1000,1,1) to LocalDate.of(9998,12,31)
         "CUSTOM" -> {
             require(customStart!=null && customEnd!=null && !customStart.isAfter(customEnd))
             customStart to customEnd

@@ -52,6 +52,8 @@ version=db.execute("PRAGMA user_version").fetchone()[0]
 assert version==12, f"Expected V0.2.6 schema v12, got {version}"
 db.execute("INSERT INTO transactions (platform,occurred_at,counterparty,description,direction_text,trade_type,amount_cent,flow_type,category,nature_modified,payment_method,transaction_id,merchant_order_id,source_file,fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 ("WECHAT", 1780000000000, "拾贰便利店", "二维码收款", "支出", "商户消费", 1200, "EXPENSE", "其他", 0, "零钱", "ci-smoke", "ci-smoke", "微信账单.csv", "ci-smoke-fingerprint"))
+db.execute("INSERT INTO transactions (platform,occurred_at,counterparty,description,direction_text,trade_type,amount_cent,flow_type,category,nature_modified,payment_method,transaction_id,merchant_order_id,source_file,fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+("WECHAT", 1780000100000, "张三", "给张三转账", "支出", "转账", 3000, "EXPENSE", "转账支出", 0, "零钱", "ci-transfer", "ci-transfer", "微信账单.csv", "ci-transfer-fingerprint"))
 db.commit()
 db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 db.close()
@@ -67,7 +69,7 @@ adb logcat -c
 adb shell am start -W -n "$APP/.MainActivity"
 sleep 9
 adb shell pidof "$APP"
-check_home_screen "upgraded V0.3.5"
+check_home_screen "upgraded V0.3.6"
 
 # Exercise the actual newly added Finance Center UI. Merely launching the
 # process or dashboard would miss Compose/page-specific regressions.
@@ -110,15 +112,20 @@ python3 - <<'PY'
 import sqlite3
 db=sqlite3.connect("/tmp/ledger-v13.db")
 version=db.execute("PRAGMA user_version").fetchone()[0]
-assert version==14, f"Expected upgraded schema v14, got {version}"
+assert version==15, f"Expected upgraded schema v15, got {version}"
 row=db.execute("SELECT counterparty,amount_cent,category FROM transactions WHERE fingerprint='ci-smoke-fingerprint'").fetchone()
 assert row==("拾贰便利店",1200,"其他"), f"Original imported ledger changed or missing: {row}"
 tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 assert {"finance_installment_plans","finance_installment_links",
         "classification_evidence","category_change_batches",
         "category_change_items","category_rule_changes",
-        "cross_platform_category_rules","product_category_rules"}<=tables, tables
-print("PASS: V0.2.6 -> V0.3.5 Android boot; v14 migration retained original ledger")
+        "cross_platform_category_rules","product_category_rules",
+        "person_transfer_tags","counterparty_aliases"}<=tables, tables
+transfer=db.execute("""SELECT t.counterparty,t.amount_cent,t.category,p.direction
+    FROM transactions t JOIN person_transfer_tags p ON p.transaction_id=t.id
+    WHERE t.fingerprint='ci-transfer-fingerprint'""").fetchone()
+assert transfer==("张三",3000,"转账支出","OUT"), f"Old transfer migration lost identity: {transfer}"
+print("PASS: V0.2.6 -> V0.3.6 Android boot; v15 migration retained bills and transfer tags")
 db.close()
 PY
 
