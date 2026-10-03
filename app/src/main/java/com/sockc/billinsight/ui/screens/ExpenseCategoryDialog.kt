@@ -33,7 +33,7 @@ fun ExpenseCategoryDialog(
     val mixed=MerchantLexicon.requiresProductEvidence(transaction.counterparty)
     val merchantAllowed=MerchantCategoryPolicy.key(transaction,emptyMap())!=null && !mixed
     val crossAllowed=merchantAllowed && transaction.platform in setOf(Platform.WECHAT,Platform.ALIPAY)
-    val productAllowed=mixed && MerchantLexicon.explain("",transaction.description)?.category!=null
+    val productAllowed=mixed && MerchantLexicon.canRememberProductDescription(transaction.description)
     var search by remember(transaction.id){mutableStateOf("")}
     var category by remember(transaction.id) {
         mutableStateOf(transaction.category.takeIf {it in TransactionClassifier.categories} ?: "其他")
