@@ -101,7 +101,8 @@ fun DateScopeTitle(title:String,subtitle:String,state:BillUiState,
             LocalDate.now().year).distinct().sortedDescending()
         val picker=rememberDatePickerState(
             initialSelectedDateMillis=null,
-            initialDisplayedMonthMillis=state.homeStart.withDayOfMonth(1)
+            initialDisplayedMonthMillis=(if(state.homePeriod=="ALL_HISTORY")
+                LocalDate.now() else state.homeStart).withDayOfMonth(1)
                 .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
             yearRange=1000..3000
         )
