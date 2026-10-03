@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.sockc.billinsight.model.Platform
+import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.Transaction
 import com.sockc.billinsight.util.parseAmountToCent
 import com.sockc.billinsight.util.parseDateTimeOrNull
@@ -142,7 +143,7 @@ class BillImporter(
         val status = value("当前状态", "交易状态", "状态", "订单状态", "支付状态")
         val transactionId = value("交易单号", "交易号", "支付宝交易号", "支付单号", "流水号")
         val merchantOrderId = value("商户单号", "商家订单号", "商户订单号", "订单号", "订单编号")
-        val amountCent = parseAmountToCent(amountRaw)
+        val sourceAmountCent = parseAmountToCent(amountRaw)
         val resolvedDirection = when {
             direction.contains("支出") || direction.contains("收入") -> direction
             direction.contains("退款") -> "收入"
@@ -153,7 +154,8 @@ class BillImporter(
             else -> direction
         }
 
-        if (time.isBlank() && merchant.isBlank() && description.isBlank() && amountCent == 0L) return null
+        if (time.isBlank() && merchant.isBlank() && description.isBlank() && sourceAmountCent == 0L) return null
+        val amountDecision = ImportAmountPolicy.resolve(amountRaw, resolvedDirection)
 
         val classification = TransactionClassifier.classify(
             direction = resolvedDirection,
@@ -172,18 +174,18 @@ class BillImporter(
             merchant,
             description,
             resolvedDirection,
-            amountCent.toString()
+            sourceAmountCent.toString()
         )
         return Transaction(
             platform = platform,
             occurredAt = occurredAt,
             counterparty = merchant,
-            description = description.ifBlank { type },
+            description = description.ifBlank { type } + amountDecision.auditNote,
             directionText = resolvedDirection,
             tradeType = type,
-            amountCent = amountCent,
-            flowType = classification.flowType,
-            category = classification.category,
+            amountCent = amountDecision.cents,
+            flowType = if (amountDecision.needsReview) FlowType.PENDING else classification.flowType,
+            category = if (amountDecision.needsReview) "金额待核对" else classification.category,
             paymentMethod = payment,
             transactionId = transactionId,
             merchantOrderId = merchantOrderId,

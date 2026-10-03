@@ -1917,10 +1917,13 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             val placeholders = ids.joinToString(",") { "?" }
             val candidates = mutableListOf<ReviewCandidate>()
             db.rawQuery(
-                "SELECT id,direction_text,flow_type FROM transactions WHERE id IN ($placeholders)",
+                "SELECT id,direction_text,flow_type,amount_cent FROM transactions WHERE id IN ($placeholders)",
                 ids.map { it.toString() }.toTypedArray()
             ).use { c ->
                 while (c.moveToNext()) {
+                    require(c.getLong(3)>0L) {
+                        "所选流水包含零金额或负金额，请先逐笔核对金额"
+                    }
                     candidates += ReviewCandidate(
                         c.getLong(0), c.getString(1),
                         FlowType.valueOf(c.getString(2))
@@ -1937,7 +1940,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             var updated = 0
             ids.forEach { id ->
                 updated += db.update(
-                    "transactions", values, "id=? AND flow_type='PENDING'",
+                    "transactions", values,
+                    "id=? AND flow_type='PENDING' AND amount_cent>0",
                     arrayOf(id.toString())
                 )
             }
@@ -2045,6 +2049,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     WHERE counterparty=? AND platform=? AND id<>?
                       AND direction_text LIKE ? AND nature_modified=0
                       AND flow_type IN ('EXPENSE','INCOME','PENDING')
+                      AND amount_cent>0
                       AND trade_type NOT LIKE '%退款%'
                       AND trade_type NOT LIKE '%还款%'
                       AND trade_type NOT LIKE '%提现%'
@@ -2113,8 +2118,60 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         }
     }
 
+    /**
+     * User correction for anomalous imported amounts. The original amount
+     * remains in the description and fingerprint (no schema migration).
+     * Never infer spending type from a corrected amount: keep it PENDING.
+     */
+    fun correctImportedAmount(id: Long, correctedCents: Long) {
+        require(correctedCents > 0L && correctedCents <= 100_000_000_000L) {
+            "请输入有效的正数金额"
+        }
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val original=db.rawQuery(
+                "SELECT amount_cent,flow_type,category,source_file,description " +
+                    "FROM transactions WHERE id=?",arrayOf(id.toString())
+            ).use { c ->
+                require(c.moveToFirst()) { "未找到此笔导入账单" }
+                listOf(
+                    c.getString(0),c.getString(1),c.getString(2),
+                    c.getString(3),c.getString(4)
+                )
+            }
+            require(original[1]=="PENDING" && original[2]=="金额待核对" &&
+                original[0].toLong()<=0L && !original[3].startsWith("手动")) {
+                "只能核对尚未确认的导入异常金额"
+            }
+            val newDescription=original[4]+
+                if(original[4].contains("[已在应用内核对金额]")) "" else
+                    " [已在应用内核对金额]"
+            val changed=db.update("transactions",ContentValues().apply {
+                put("amount_cent",correctedCents)
+                put("category","待确认")
+                put("description",newDescription)
+                put("nature_modified",1)
+            },"id=? AND flow_type='PENDING' AND amount_cent<=0",
+                arrayOf(id.toString()))
+            require(changed==1) { "流水状态发生变化，请刷新后重试" }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun updateNature(id: Long, flowType: FlowType, category: String) {
         require(id > 0) { "无效流水" }
+        val currentAmount=readableDatabase.rawQuery(
+            "SELECT amount_cent FROM transactions WHERE id=?",arrayOf(id.toString())
+        ).use { c ->
+            require(c.moveToFirst()) { "该笔流水已不存在" }
+            c.getLong(0)
+        }
+        require(currentAmount > 0L || flowType == FlowType.PENDING) {
+            "原始金额为零或负数，请先在流水中核对金额，再确认用途"
+        }
         require(category.isNotBlank()) { "请选择分类" }
         val linkedManualScan=readableDatabase.rawQuery(
             "SELECT 1 FROM manual_scan_links WHERE manual_id=? OR imported_id=? LIMIT 1",

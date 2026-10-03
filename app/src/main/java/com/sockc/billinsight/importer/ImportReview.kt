@@ -22,7 +22,7 @@ object ImportReview {
                 it.flowType==FlowType.CREDIT_REPAYMENT
             },
             invalidAmountCount=parsed.transactions.count {
-                it.amountCent<=0L && it.flowType!=FlowType.IGNORE
+                it.amountCent<=0L
             },
             qrExpenseCount=parsed.transactions.count(ScanPaymentClassifier::isQrExpense),
             qrMerchantReviewCount=parsed.transactions.count {

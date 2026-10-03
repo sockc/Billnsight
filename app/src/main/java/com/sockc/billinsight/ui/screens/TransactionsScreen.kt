@@ -58,6 +58,7 @@ fun TransactionsScreen(
     platformFilter: Platform?,
     onPlatformChange: (Platform?) -> Unit,
     onNatureChange: (Transaction, FlowType, String, Boolean) -> Unit,
+    onCorrectAmount: (Long,Long) -> Unit,
     loanDetails: Map<Long,LoanRepaymentDetail>,
     onSaveLoan: (Long,Long,Long,Long) -> Unit,
     onClearLoan: (Long) -> Unit,
@@ -72,6 +73,7 @@ fun TransactionsScreen(
     var editing by remember { mutableStateOf<Transaction?>(null) }
     var editingCategory by remember { mutableStateOf<Transaction?>(null) }
     var editingLoan by remember { mutableStateOf<Transaction?>(null) }
+    var correctingAmount by remember { mutableStateOf<Transaction?>(null) }
     var financeSource by remember { mutableStateOf<Transaction?>(null) }
     financeSource?.let { tx ->
         FinanceInstallmentEditor(source=tx,onDismiss={financeSource=null},
@@ -80,6 +82,12 @@ fun TransactionsScreen(
                 financeSource=null
                 onOpenFinance()
             })
+    }
+    correctingAmount?.let { tx ->
+        ImportAmountCorrectionDialog(
+            transaction=tx,onDismiss={correctingAmount=null},
+            onSave={ amount -> onCorrectAmount(tx.id,amount);correctingAmount=null }
+        )
     }
     editingLoan?.let { tx ->
         LoanSplitDialog(transaction=tx,existing=loanDetails[tx.id],
@@ -252,8 +260,13 @@ fun TransactionsScreen(
                     Column(Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth(),
                         horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                        TextButton(onClick={editing=tx}) {
-                            Text(if(tx.flowType==FlowType.PENDING) "确认用途" else "修改性质")
+                        if(tx.flowType==FlowType.PENDING && tx.amountCent<=0L &&
+                            tx.category=="金额待核对") {
+                            TextButton(onClick={correctingAmount=tx}) { Text("核对金额") }
+                        } else {
+                            TextButton(onClick={editing=tx}) {
+                                Text(if(tx.flowType==FlowType.PENDING) "确认用途" else "修改性质")
+                            }
                         }
                         if(tx.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) {
                             TextButton(onClick={

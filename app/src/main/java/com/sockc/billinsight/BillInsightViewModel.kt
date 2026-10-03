@@ -284,7 +284,12 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                         uri,synchronized(db) { db.merchantRules() },zipPassword
                     )
                     val parsed=synchronized(db) {
-                        raw.copy(transactions=db.applyPlatformCategoryRules(db.applyMerchantNatureRules(raw.transactions)))
+                        val ruled=db.applyPlatformCategoryRules(db.applyMerchantNatureRules(raw.transactions))
+                        raw.copy(transactions=ruled.map { tx ->
+                            if(tx.amountCent<=0L)
+                                tx.copy(flowType=FlowType.PENDING,category="金额待核对")
+                            else tx
+                        })
                     }
                     val fingerprints=synchronized(db) {
                         db.existingFingerprints(parsed.transactions.map { it.fingerprint }) +
@@ -300,7 +305,14 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     pendingParsedBill=parsed
                     _uiState.value=_uiState.value.copy(
                         importPreview=preview,isLoading=false,needsZipPassword=false,
-                        message="账单来源或金额异常，请检查原文件；未写入任何记录"
+                        message="账单来源或日期无法识别，尚未导入"
+                    )
+                } else if(preview.requiresAmountConfirmation) {
+                    pendingParsedBill=parsed
+                    _uiState.value=_uiState.value.copy(
+                        importPreview=preview,isLoading=false,needsZipPassword=false,
+                        message="发现 "+preview.invalidAmountCount+
+                            " 笔金额待核对；可确认全量导入，不必修改原文件"
                     )
                 } else {
                     val saved=runCatching {
@@ -354,7 +366,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         val parsed=pendingParsedBill ?: return
         val preview=_uiState.value.importPreview ?: return
         if (_uiState.value.isLoading || !preview.canCommit) {
-            _uiState.value=_uiState.value.copy(message="请先解决导入预览中的异常")
+            _uiState.value=_uiState.value.copy(message="请先核对账单来源或日期")
             return
         }
         _uiState.value=_uiState.value.copy(isLoading=true)
@@ -390,6 +402,24 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     message=(error.message?:"保存账单失败") + "；可重新确认或取消"
                 )
             }
+        }
+    }
+
+    /** In-app correction leaves the original export and fingerprint untouched. */
+    fun correctImportedAmount(id: Long, correctedCents: Long) {
+        viewModelScope.launch {
+            val result=runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db){ db.correctImportedAmount(id,correctedCents) }
+                }
+            }
+            _uiState.value=_uiState.value.copy(
+                message=result.fold(
+                    onSuccess={ "金额已核对；请继续确认此笔交易用途" },
+                    onFailure={ it.message ?: "金额核对失败，原记录未修改" }
+                )
+            )
+            if(result.isSuccess) refresh()
         }
     }
 
