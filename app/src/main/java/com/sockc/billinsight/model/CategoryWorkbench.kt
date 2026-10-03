@@ -26,6 +26,7 @@ data class CategoryReviewGroup(
 
 data class AutoCategoryPreview(
     val scanned: Int = 0,
+    val totalImported:Int = 0,
     val proposed: Int = 0,
     val unresolved: Int = 0,
     val protected: Int = 0,
