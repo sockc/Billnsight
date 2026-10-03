@@ -57,45 +57,89 @@ object MerchantLexicon {
         return cleaned.replace(Regex("[\\s：:()（）\\[\\]【】_\\-—·]+"), "")
     }
 
-    private data class Hit(val category: String, val score: Int)
+    /** Exact evidence shown beside a category; equal-strength conflicts need review. */
+    data class Evidence(
+        val category: String?,
+        val matchedTerm: String,
+        val source: String,
+        val conflict: Boolean = false,
+    )
 
-    private fun match(text: String, terms: List<String>, category: String, base: Int): Hit? {
-        val length = terms.filter { text.contains(it) }.maxOfOrNull { it.length } ?: return null
-        return Hit(category, base + length)
+    private data class Hit(
+        val category: String,
+        val score: Int,
+        val term: String,
+        val source: String
+    )
+
+    private val mixedPlatforms = listOf(
+        "京东", "淘宝", "天猫", "拼多多", "美团", "抖音",
+        "快手", "支付宝", "微信支付", "小红书", "综合超市",
+        "沃尔玛", "盒马", "山姆", "永辉超市", "华润万家"
+    )
+    private val paymentProcessors = listOf(
+        "财付通支付", "支付宝中国网络技术", "网联清算",
+        "银联商务", "通联支付", "拉卡拉支付", "付临门支付",
+        "富友支付", "汇付天下", "收钱吧支付"
+    )
+
+    fun requiresProductEvidence(merchant: String): Boolean {
+        val name=normalize(merchant)
+        return mixedPlatforms.any { name.contains(normalize(it)) } ||
+            paymentProcessors.any { name.contains(normalize(it)) }
     }
 
-    private fun choose(hits: List<Hit>): String? {
-        val highest = hits.maxOfOrNull { it.score } ?: return null
-        return hits.filter { it.score == highest }.map { it.category }.distinct()
-            .singleOrNull()
+    private fun match(
+        text: String, terms: List<String>, category: String, base: Int, source: String
+    ): Hit? {
+        val term=terms.filter { text.contains(it) }.maxByOrNull { it.length } ?: return null
+        return Hit(category,base+term.length,term,source)
+    }
+
+    private fun choose(hits: List<Hit>): Evidence? {
+        val best=hits.maxOfOrNull { it.score } ?: return null
+        val equal=hits.filter {it.score==best}
+        if(equal.map {it.category}.distinct().size>1)
+            return Evidence(null,equal.joinToString(" / ") {it.term},
+                "规则冲突",true)
+        val hit=equal.first()
+        return Evidence(hit.category,hit.term,hit.source)
     }
 
     /**
-     * Recognize spending only; callers determine direction/repayments/transfers first.
-     * Do not infer a shop merely from a QR-code placeholder or the payment platform.
+     * Purchases on mixed marketplaces and through payment aggregators MUST have
+     * concrete product evidence. A brand like 京东 alone isn't a product category.
      */
-    fun suggest(merchant: String, description: String = ""): String? {
-        val name = normalize(merchant)
-        val detail = normalize(description)
-        val merchantHits = if (name.isBlank() ||
-            ScanPaymentClassifier.isGenericCounterparty(merchant)) emptyList() else
-            entries.flatMap { entry ->
-                listOfNotNull(
-                    match(name, entry.merchants, entry.category, 1000),
-                    match(name, entry.keywords, entry.category, 500)
-                )
-            }
-        // Descriptions can disambiguate a multi-service platform, but generic
-        // "扫码付款" / "充电" / "充值" alone are not purchase evidence.
-        val detailHits = if (detail.isBlank()) emptyList() else
-            entries.flatMap { entry ->
-                listOfNotNull(
-                    match(detail, entry.merchants, entry.category, 300),
-                    match(detail, entry.keywords, entry.category, 200)
-                )
-            }
-        return choose(merchantHits + detailHits)
+    fun explain(merchant: String,description: String = ""): Evidence? {
+        val name=normalize(merchant)
+        val detail=normalize(description)
+        val ambiguous=requiresProductEvidence(merchant)
+        val generic=ScanPaymentClassifier.isGenericCounterparty(merchant)
+        val merchantHits=if(name.isBlank() || generic || ambiguous) emptyList() else
+            entries.flatMap { entry -> listOfNotNull(
+                match(name,entry.merchants,entry.category,1000,"商户品牌"),
+                match(name,entry.keywords,entry.category,500,"商户类型")
+            )}
+        val detailHits=if(detail.isBlank()) emptyList() else
+            entries.flatMap { entry -> listOfNotNull(
+                match(detail,entry.merchants,entry.category,300,"商品描述"),
+                match(detail,entry.keywords,entry.category,200,"商品描述")
+            )}
+        // A platform's own name appearing in its description doesn't identify a
+        // purchase. Only a separate concrete product/secondary merchant term can.
+        val filteredDetail=if(!ambiguous)detailHits else detailHits.filter { hit ->
+            !mixedPlatforms.any { normalize(it)==hit.term } &&
+                !paymentProcessors.any { normalize(it)==hit.term } &&
+                !listOf("美团外卖","美团买单","京东商城","抖音商城","淘宝商城",
+                    "京东购物","美团餐饮").contains(hit.term) &&
+                (hit.source=="商品描述")
+        }
+        val chosen=if(ambiguous)choose(filteredDetail) else choose(merchantHits+detailHits)
+        return chosen
     }
+
+    fun suggest(merchant: String,description: String = ""): String? =
+        explain(merchant,description)?.category
 
     val termCount: Int by lazy {
         entries.flatMap { it.merchants + it.keywords }.distinct().size
