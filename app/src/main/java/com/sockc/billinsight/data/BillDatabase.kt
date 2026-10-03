@@ -1719,7 +1719,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         limit: Int = 20,
     ): List<MerchantTotal> {
         val (start, end) = monthRange(month)
-        val conditions = mutableListOf("occurred_at >= ?", "occurred_at < ?", "flow_type IN ('EXPENSE','GIFT_EXPENSE')", "AND NOT EXISTS(SELECT 1 FROM finance_installment_plans fp WHERE fp.origin_transaction_id=transactions.id AND fp.kind='ADVANCE')")
+        // Predicates only; joinToString(" AND ") supplies the conjunction.
+        val conditions = ExpenseSqlPolicy.merchantConditions()
         val args = mutableListOf(start.toString(), end.toString())
         platform?.let {
             conditions += "platform=?"
