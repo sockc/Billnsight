@@ -27,12 +27,8 @@ object MerchantCategoryPolicy {
         return tx.platform to identity
     }
 
-    /**
-     * An intentional merchant-wide fix can repair old "其他" entries, even if an
-     * older workflow marked those as manually reviewed. Meaningful manually
-     * assigned categories stay protected.
-     */
+    /** A saved manual decision is protected even when its chosen category is "其他". */
     fun canReplaceHistorical(tx: Transaction, natureModified: Boolean): Boolean =
         tx.flowType == FlowType.EXPENSE &&
-            (!natureModified || tx.category == "其他")
+            !natureModified
 }
