@@ -384,18 +384,19 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             val generic = merchantRules().mapKeys {
                 MerchantCategoryPolicy.normalize(it.key)
             }
-            val aliases = merchantAliases()
+            val aliases = merchantAliases().mapKeys { MerchantCategoryPolicy.normalize(it.key) }
             var changed = 0
             candidates.zip(scoped).forEach { (original, resolved) ->
                 val raw = MerchantCategoryPolicy.normalize(original.counterparty)
                 val canonical = aliases[raw]?.let(MerchantCategoryPolicy::normalize) ?: raw
-                val explicit = generic[raw] ?: generic[canonical]
+                // "其他" is a placeholder, not a definitive user rule for this pass.
+                val explicit = (generic[raw] ?: generic[canonical])?.takeUnless { it=="其他" }
                 val category = when {
                     resolved.category != "其他" -> resolved.category
                     explicit != null -> explicit
                     else -> com.sockc.billinsight.importer.MerchantLexicon.suggest(
                         original.counterparty, original.description
-                    )
+                    ) ?: aliases[raw]?.let {com.sockc.billinsight.importer.MerchantLexicon.suggest(it)}
                 }
                 if (category != null && category != "其他" &&
                     category in TransactionClassifier.categories) {
@@ -418,7 +419,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 var manual = 0
                 while (c.moveToNext()) {
                     when {
-                        c.getString(0) == "手动记账" -> manual++
+                        c.getString(0).startsWith("手动") -> manual++
                         c.getInt(1) != 0 -> reviewed++
                         else -> unmatched++
                     }

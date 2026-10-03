@@ -1,0 +1,37 @@
+name: Android rebuild startup smoke
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  boot-and-migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Enable KVM for Android emulator
+        run: |
+          sudo usermod -aG kvm $USER
+          sudo chmod 666 /dev/kvm || true
+      - name: Boot V0.2.6, seed ledger and upgrade to rebuilt app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash scripts/ci-rebuild-startup-smoke.sh

@@ -16,6 +16,6 @@ object OtherReclassificationPolicy {
         includeReviewedOther: Boolean,
     ): Boolean =
         flow == FlowType.EXPENSE && category == "其他" &&
-            sourceFile != "手动记账" &&
+            !sourceFile.startsWith("手动") &&
             (!manuallyModified || includeReviewedOther)
 }
