@@ -4,6 +4,7 @@ import com.sockc.billinsight.model.FlowType
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
 import com.sockc.billinsight.model.CategoryReviewItem
+import com.sockc.billinsight.model.displayName
 
 /**
  * Only proposes new CONSUMPTION categories after the recorded transaction
@@ -27,6 +28,24 @@ object CategoryWorkbenchPolicy {
         if(tx.flowType!=FlowType.EXPENSE) return CategoryReviewItem(
             tx,null,"","非个人消费",false,manuallyEdited
         )
+        val purposeHint=(tx.tradeType+" "+tx.description+" "+
+            tx.counterparty).lowercase()
+        val signals=listOf("还款","还信用卡","贷款扣款","退款","退回",
+            "提现","余额宝","零钱通","账户互转","资金划转")
+        if(signals.any {purposeHint.contains(it)}) {
+            val newly=TransactionClassifier.classify(
+                tx.directionText,tx.tradeType,tx.counterparty,
+                tx.description,"",emptyMap(),tx.paymentMethod
+            )
+            if(newly.flowType in setOf(
+                FlowType.CREDIT_REPAYMENT,FlowType.LOAN_REPAYMENT,
+                FlowType.REFUND,FlowType.TRANSFER
+            )) return CategoryReviewItem(
+                tx,null,"","疑似"+newly.flowType.displayName()+
+                    "，请先核对交易用途，不自动修改消费分类",
+                true,manuallyEdited,newly.flowType.displayName()
+            )
+        }
         val raw=MerchantCategoryPolicy.normalize(tx.counterparty)
         val canonical=aliases[raw]?.let(MerchantCategoryPolicy::normalize) ?: raw
         val mixed=isMixedMerchant(tx.counterparty)
