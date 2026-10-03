@@ -38,6 +38,9 @@ object TransactionClassifier {
                 else -> Classification(FlowType.PENDING, "待确认")
             }
         }
+        FinancialTransactionDetector.detect(
+            direction,type,merchant,description,status,paymentMethod
+        )?.let{return it}
         // Repayment destination can appear in the merchant field or payment method.
         // Do not confuse a purchase paid WITH a credit card with paying off its bill.
         if (CreditRepaymentDetector.isRepayment(
