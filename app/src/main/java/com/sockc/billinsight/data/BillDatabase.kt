@@ -15,6 +15,7 @@ import com.sockc.billinsight.model.LoanProfile
 import com.sockc.billinsight.model.MerchantRule
 import com.sockc.billinsight.model.TrendPoint
 import com.sockc.billinsight.importer.CreditRepaymentDetector
+import com.sockc.billinsight.importer.FinancialTransactionDetector
 import com.sockc.billinsight.importer.ScanPaymentClassifier
 import com.sockc.billinsight.importer.MerchantCategoryPolicy
 import com.sockc.billinsight.model.CategoryEditPreview
@@ -710,6 +711,72 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         } finally {
             db.endTransaction()
         }
+    }
+
+    /** Range is start-inclusive, next-year-exclusive in the device timezone. */
+    fun financialHistoryForYear(year: Int): List<Transaction> {
+        require(year in 2000..2100)
+        val zone=ZoneId.systemDefault()
+        val start=LocalDate.of(year,1,1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val end=LocalDate.of(year+1,1,1).atStartOfDay(zone).toInstant().toEpochMilli()
+        return readableDatabase.rawQuery(
+            """SELECT * FROM transactions
+               WHERE occurred_at>=? AND occurred_at<?
+                 AND flow_type IN ('CREDIT_REPAYMENT','LOAN_REPAYMENT','TRANSFER')
+               ORDER BY occurred_at DESC, id DESC""".trimIndent(),
+            arrayOf(start.toString(),end.toString())
+        ).use { c -> buildList {while(c.moveToNext())add(c.toTransaction())} }
+    }
+
+    /** Explicit user action only: update strong previously ignored financial evidence.
+     * Manually classified, refunded, failed, and linked records are left untouched.
+     */
+    fun recheckFinancialHistory(year: Int): Int {
+        require(year in 2000..2100)
+        val zone=ZoneId.systemDefault()
+        val start=LocalDate.of(year,1,1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val end=LocalDate.of(year+1,1,1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val updates=mutableListOf<Pair<Long,com.sockc.billinsight.importer.Classification>>()
+            db.rawQuery(
+                """SELECT t.id,t.direction_text,t.trade_type,t.counterparty,
+                          t.description,t.payment_method,t.flow_type,t.category
+                   FROM transactions t
+                   WHERE t.occurred_at>=? AND t.occurred_at<?
+                     AND t.amount_cent>0 AND t.nature_modified=0
+                     AND (t.flow_type IN ('IGNORE','PENDING','TRANSFER') OR
+                         (t.flow_type='EXPENSE' AND t.category='其他'))
+                     AND NOT EXISTS(
+                         SELECT 1 FROM finance_installment_links fl
+                         WHERE fl.transaction_id=t.id
+                     )
+                     AND NOT EXISTS(
+                         SELECT 1 FROM transaction_links tl
+                         WHERE tl.expense_id=t.id OR tl.receipt_id=t.id
+                     )""".trimIndent(),arrayOf(start.toString(),end.toString())
+            ).use { c ->
+                while(c.moveToNext()) {
+                    val found=FinancialTransactionDetector.detect(
+                        c.getString(1),c.getString(2),c.getString(3),
+                        c.getString(4),"",c.getString(5)
+                    ) ?: continue
+                    if(found.flowType.name!=c.getString(6) ||
+                        found.category!=c.getString(7))
+                        updates+=c.getLong(0) to found
+                }
+            }
+            var count=0
+            updates.forEach { (id,found) ->
+                count+=db.update("transactions",ContentValues().apply {
+                    put("flow_type",found.flowType.name)
+                    put("category",found.category)
+                },"id=? AND nature_modified=0",arrayOf(id.toString()))
+            }
+            db.setTransactionSuccessful()
+            return count
+        } finally {db.endTransaction()}
     }
 
     private fun createLoanDetailsTable(db: SQLiteDatabase) {

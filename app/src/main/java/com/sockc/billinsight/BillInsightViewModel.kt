@@ -156,6 +156,18 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     loanHistory = db.loanHistory(),
                     loanProfiles = db.loanProfiles(),
                     financePlans=if(financeViewOpened) financeStore.plans() else emptyList(),
+                    financeYear=_uiState.value.financeYear,
+                    financeHistory=if(financeViewOpened)
+                        db.financialHistoryForYear(_uiState.value.financeYear)
+                        else _uiState.value.financeHistory,
+                    financeManualRepayments=if(financeViewOpened) {
+                        val y=_uiState.value.financeYear
+                        val zone=ZoneId.systemDefault()
+                        db.rangeManualCreditPayments(
+                            LocalDate.of(y,1,1).atStartOfDay(zone).toInstant().toEpochMilli(),
+                            LocalDate.of(y+1,1,1).atStartOfDay(zone).toInstant().toEpochMilli()
+                        )
+                    } else _uiState.value.financeManualRepayments,
                     financeOriginResults=_uiState.value.financeOriginResults,
                     financeSearchQuery=_uiState.value.financeSearchQuery,
                     financeLinkCandidates=_uiState.value.financeLinkCandidates,
@@ -233,6 +245,32 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 return@launch
             }
             if (ticket == latestRefresh) _uiState.value = state
+        }
+    }
+
+    fun setFinanceYear(year: Int) {
+        if(year !in 2000..(LocalDate.now().year+1)) return
+        if(_uiState.value.financeYear==year) return
+        _uiState.value=_uiState.value.copy(financeYear=year)
+        if(financeViewOpened)refresh()
+    }
+
+    fun recheckFinancialHistory() {
+        if(_uiState.value.isLoading)return
+        viewModelScope.launch {
+            val year=_uiState.value.financeYear
+            val result=runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db){db.recheckFinancialHistory(year)}
+                }
+            }
+            _uiState.value=_uiState.value.copy(
+                message=result.fold(
+                    onSuccess={"$year 年：已重新识别 $it 笔金融流水；未修改原始账单"},
+                    onFailure={it.message?:"金融记录重新识别失败"}
+                )
+            )
+            if(result.isSuccess)refresh()
         }
     }
 
@@ -1093,6 +1131,9 @@ data class BillUiState(
     val loanHistory: List<Transaction> = emptyList(),
     val loanProfiles: List<LoanProfile> = emptyList(),
     val financePlans: List<FinancePlan> = emptyList(),
+    val financeYear: Int = LocalDate.now().year,
+    val financeHistory: List<Transaction> = emptyList(),
+    val financeManualRepayments: List<ManualCreditRepayment> = emptyList(),
     val financeSearchQuery:String = "",
     val financeOriginResults:List<Transaction> = emptyList(),
     val financeLinkPlanId:Long? = null,
