@@ -247,9 +247,9 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
         require(scope=="SINGLE" || scope=="PRODUCT" || permitted) {
             "无法安全确认相同商户，请仅修改本笔或使用具体商品规则"
         }
-        require(scope!="PRODUCT" || (mixed && selected.description.isNotBlank() &&
-            MerchantLexicon.explain("",selected.description)?.category!=null)) {
-            "缺少可信商品描述，不保存综合平台的批量规则"
+        require(scope!="PRODUCT" || (mixed &&
+            MerchantLexicon.canRememberProductDescription(selected.description))) {
+            "缺少具体商品描述，不保存综合平台的批量规则"
         }
         require(scope!="CROSS" || selected.platform in setOf(Platform.WECHAT,Platform.ALIPAY)) {
             "跨平台规则只适用于明确确认的微信和支付宝商户"
