@@ -40,6 +40,37 @@ class MerchantLexiconTest {
         assertNull(MerchantLexicon.suggest("某人", "充值"))
     }
 
+    @Test fun secondScreenshotAndNaturalShopSuffixes() {
+        mapOf(
+            "缤纷生鲜汇" to "商超日用",
+            "街坊生鲜汇（石井店）" to "商超日用",
+            "粤吃越湘" to "餐饮",
+            "粤吃越湘·广州园岗店" to "餐饮",
+            "叹茶靓点（庆丰店）" to "餐饮",
+            "巷口早茶点心" to "餐饮",
+            "湘味家常小炒" to "餐饮",
+            "街坊生鲜便利店" to "商超日用",
+            "城市鲜果汇" to "水果",
+            "某某家居五金" to "购物",
+            "某某茶饮铺" to "饮品",
+            "街坊肉菜市场" to "买菜"
+        ).forEach { (merchant, expected) ->
+            assertEquals(merchant, expected, MerchantLexicon.suggest(merchant))
+        }
+        assertEquals("购物",MerchantLexicon.suggest(
+            "长壮商贸有限公司","家具三合一连接件柜体安装配件"
+        ))
+    }
+
+    @Test fun genericOrAmbiguousNamesAreNotGuessed() {
+        for(name in listOf("程耀军","快乐就好","广州市白云区石井",
+            "湘江银行","茶壶设计工作室","美团收银")) {
+            assertNull(name, MerchantLexicon.suggest(name, "二维码收款"))
+        }
+        assertNull(MerchantLexicon.suggest("未知商户", "充值"))
+        assertNull(MerchantLexicon.suggest("扫码付款", "付款给朋友"))
+    }
+
     @Test fun dictionaryIsNotJustAHandfulOfHardcodedScreenshots() {
         assertTrue(MerchantLexicon.termCount >= 700)
     }

@@ -85,13 +85,15 @@ object TransactionClassifier {
         if (qrReceipt && incoming) return Classification(FlowType.INCOME, "扫码收入")
         // Paying a friend's personal collection QR is normally a purchase too.
         // Transfer wording does not overrule explicit outgoing QR evidence.
-        if (qrPayment && outgoing) {
+        // Outgoing payer statements may describe the payee's "二维码收款".
+        // That does not turn our outgoing payment into incoming QR income.
+        if ((qrPayment || qrReceipt) && outgoing) {
             val rule = merchant.takeUnless(ScanPaymentClassifier::isGenericCounterparty)
                 ?.let { name -> merchantRules.entries.firstOrNull {
                     MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(name)
                 }?.value }
             return Classification(FlowType.EXPENSE,
-                rule ?: MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
+                rule?.takeUnless { it == "其他" } ?: MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
         }
         if (qrReceipt || kind.contains("二维码付款") || kind.contains("扫码支付")) {
             return Classification(FlowType.PENDING, "待确认")
@@ -118,7 +120,7 @@ object TransactionClassifier {
         if (!ScanPaymentClassifier.isGenericCounterparty(merchant)) {
             merchantRules.entries.firstOrNull {
                 MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(merchant)
-            }?.value?.let { return Classification(FlowType.EXPENSE, it) }
+            }?.value?.takeUnless { it == "其他" }?.let { return Classification(FlowType.EXPENSE, it) }
         }
         return Classification(FlowType.EXPENSE,
             MerchantLexicon.suggest(merchant, description) ?: categoryFor(all))
