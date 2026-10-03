@@ -2,6 +2,7 @@ package com.sockc.billinsight
 
 import android.app.Application
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sockc.billinsight.analysis.ProductAnalysis
@@ -58,6 +59,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     private val db = BillDatabase(application)
     private val financeStore = FinancePlanStore(db)
     private var financeNeedsAutoSync=true
+    private var financeViewOpened=false
     private val importer = BillImporter(application, application.contentResolver)
     private val backupManager = BackupManager(application, db)
     private var pendingImportUri: Uri? = null
@@ -119,13 +121,12 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 else emptyList()
             val previousTrendLabel=if(sameScope) _uiState.value.trendSelectionLabel
                 else null
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            val state = withContext(Dispatchers.IO) {
-                synchronized(db) {
-                if(financeNeedsAutoSync) {
-                    financeStore.syncVerifiedHistory()
-                    financeNeedsAutoSync=false
-                }
+            _uiState.value = _uiState.value.copy(isLoading = true, startupError = null)
+            // The V0.2.6 dashboard opens without touching the optional installment store.
+            // Loading and matching installment history only occurs when that tab is opened.
+            val state = try {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) {
                 val thresholdCent = smallThresholdYuan * 100L
                 val categories = db.categoryTotals(month, platform)
                 val rangeRows = db.rangeTransactions(homeStartMillis,homeEndMillis,platform,10000)
@@ -154,7 +155,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     creditHistory = db.creditHistory(),
                     loanHistory = db.loanHistory(),
                     loanProfiles = db.loanProfiles(),
-                    financePlans=financeStore.plans(),
+                    financePlans=if(financeViewOpened) financeStore.plans() else emptyList(),
                     financeOriginResults=_uiState.value.financeOriginResults,
                     financeSearchQuery=_uiState.value.financeSearchQuery,
                     financeLinkCandidates=_uiState.value.financeLinkCandidates,
@@ -174,8 +175,10 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     merchantGroups = MerchantAnalysis.groups(history, merchantAliases, scanLabels),
                     monthlyMerchantGroups = MerchantAnalysis.groups(monthly, merchantAliases, scanLabels),
                     links = db.linksForMonth(month, platform),
-                    linkedReceiptIds = db.linkedReceiptIds() + financeStore.recoveryReceiptIds(),
-                    entrustedOriginIds=financeStore.entrustedOriginIds(),
+                    linkedReceiptIds = db.linkedReceiptIds() +
+                        if(financeViewOpened) financeStore.recoveryReceiptIds() else emptySet(),
+                    entrustedOriginIds=if(financeViewOpened)
+                        financeStore.entrustedOriginIds() else emptySet(),
                     linkableReceipts = db.searchTransactions("", null, "INCOME", 2000)
                         .filter { it.flowType in setOf(FlowType.INCOME, FlowType.REFUND) },
                     month = month,
@@ -211,9 +214,52 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     isLoading = false,
                     message = previousMessage,
                 )
+                    }
                 }
+            } catch (cancelled: java.util.concurrent.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e("BillInsightStartup", "账本加载失败；保留原始数据", error)
+                if(ticket==latestRefresh) {
+                    val trace=error.stackTrace.take(7).joinToString("\n") {
+                        "${it.className}.${it.methodName}:${it.lineNumber}"
+                    }
+                    _uiState.value=_uiState.value.copy(
+                        isLoading=false,
+                        startupError=error.javaClass.simpleName+": "+
+                            (error.message ?: "未知错误").take(450)+"\n"+trace
+                    )
+                }
+                return@launch
             }
             if (ticket == latestRefresh) _uiState.value = state
+        }
+    }
+
+    /** Explicitly open optional finance; never auto-sync it during dashboard startup. */
+    fun openFinanceInstallments() {
+        if(_uiState.value.isLoading) return
+        viewModelScope.launch {
+            val result=runCatching {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) {
+                        if(financeNeedsAutoSync) financeStore.syncVerifiedHistory()
+                        financeStore.plans()
+                    }
+                }
+            }
+            if(result.isSuccess) {
+                financeNeedsAutoSync=false
+                financeViewOpened=true
+                refresh()
+            } else {
+                Log.e("BillInsightFinance", "分期延迟加载失败",result.exceptionOrNull())
+                _uiState.value=_uiState.value.copy(
+                    isLoading=false,
+                    message="金融分期暂时无法读取：" +
+                        (result.exceptionOrNull()?.message ?: "未知错误").take(170)
+                )
+            }
         }
     }
 
@@ -683,23 +729,19 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             deleteProductAlias(key)
         }
 
-    fun reclassifyOtherExpenses(includeReviewedOther: Boolean = false) {
+    fun reclassifyOtherExpenses() {
         if (_uiState.value.isLoading) return
         viewModelScope.launch {
             val outcome = runCatching {
                 withContext(Dispatchers.IO) {
-                    synchronized(db) { db.reclassifyOtherExpenses(includeReviewedOther) }
+                    synchronized(db) { db.reclassifyOtherExpenses() }
                 }
             }
             _uiState.value = _uiState.value.copy(
                 dataAudit = null,
                 message = outcome.fold(
-                    onSuccess = { report ->
-                        "本次检查 ${report.checked} 笔，成功识别 ${report.updated} 笔；" +
-                            "全账本仍有 ${report.remaining} 笔其他消费：" +
-                            "词库未命中 ${report.unmatched}、" +
-                            "已人工标记其他 ${report.reviewedOther}、" +
-                            "手动记账 ${report.manualOther}"
+                    onSuccess = { (changed, remaining) ->
+                        "已重新识别 $changed 笔其他消费，剩余 $remaining 笔需确认；人工分类未改动"
                     },
                     onFailure = { it.message ?: "重新识别失败，原始账单未修改" }
                 )
@@ -1055,6 +1097,7 @@ data class BillUiState(
     val recurringExpenses: List<RecurringExpense> = emptyList(),
     val totalStored: Int = 0,
     val isLoading: Boolean = true,
+    val startupError: String? = null,
     val message: String? = null,
     val needsZipPassword: Boolean = false,
 )

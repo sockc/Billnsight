@@ -307,19 +307,3 @@ Release 工作流在构建后使用 `apksigner` 再次校验 APK，证书指纹�
 - SQLite 从 V5 非破坏性升级到 V6，新建贷款拆分表。仅对仍是默认「资金流转」、且原始交易类型明确含贷款还款的历史记录执行自动迁移；其他旧记录可逐笔修改性质，避免误改人工分类。
 - AES-256 `.bia` 备份包含 V6 的拆分记录。升级前建议导出已有账本并保留原始微信/支付宝账单。
 
-
-## V0.2.7 · Offline merchant classification
-
-- Bundled local dictionary: roughly 800 distinct common merchant names, brands and
-  spending keywords covering food, neighbourhood supermarkets, charging, tolls,
-  phone bills and other daily purchases; no network request required.
-- Classification order: repayment/refund/transfer nature first, then saved merchant
-  rules, then specific merchant terms and descriptive purchase hints. A shared
-  brand category never merges unrelated merchants: use explicit aliases for that.
-- In **分析 → 消费分类排行 → 其他** or **我的 → 分类与规则**, confirm
-  **重新识别已有其他消费** to revisit imported, unreviewed personal purchases.
-  Manually confirmed categories and all repayment/transfer records are preserved.
-- The dictionary is deliberately conservative: ambiguous person-to-person QR
-  payments remain uncategorized until the user confirms their nature or category.
-  Corrections are reused through existing source-aware merchant rules.
-- Future word-list updates can be reviewed in `MerchantLexicon.kt`.

@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -36,6 +39,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.time.LocalDate
@@ -58,6 +65,7 @@ private data class Destination(val label: String, val icon: ImageVector)
 @Composable
 fun BillInsightApp(viewModel: BillInsightViewModel) {
     val state by viewModel.uiState.collectAsState()
+    val context=LocalContext.current
     var selected by remember { mutableIntStateOf(0) }
     var detailPage by remember { mutableStateOf<String?>(null) }
     BackHandler(enabled=detailPage!=null) { detailPage=null }
@@ -218,7 +226,10 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                 destinations.forEachIndexed { index, item ->
                     NavigationBarItem(
                         selected = selected == index,
-                        onClick = { selected = index },
+                        onClick = {
+                            selected = index
+                            if(index==3) viewModel.openFinanceInstallments()
+                        },
                         icon = { Icon(item.icon,contentDescription=item.label) },
                         label = { Text(item.label) },
                         alwaysShowLabel=true,
@@ -228,7 +239,27 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            when (detailPage) {
+            if(state.startupError!=null) {
+                Column(
+                    Modifier.fillMaxSize().padding(22.dp),
+                    verticalArrangement=Arrangement.Center,
+                    horizontalAlignment=Alignment.CenterHorizontally
+                ) {
+                    Text("账本读取失败",style=MaterialTheme.typography.titleLarge)
+                    Text("本地账单未被清除。请不要卸载或清除应用数据。",
+                        modifier=Modifier.padding(top=12.dp,bottom=16.dp))
+                    Text(state.startupError.orEmpty().take(1100),
+                        style=MaterialTheme.typography.bodySmall,
+                        modifier=Modifier.padding(bottom=15.dp))
+                    Button(onClick={viewModel.refresh()}){Text("重新读取")}
+                    OutlinedButton(onClick={
+                        (context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
+                            ?.setPrimaryClip(ClipData.newPlainText(
+                                "BillInsight 启动故障",state.startupError
+                            ))
+                    }){Text("复制故障信息")}
+                }
+            } else when (detailPage) {
                 "credit" -> CreditCenterScreen(
                     state=state,
                     onBack={detailPage=null},
@@ -321,7 +352,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onClearLoan = viewModel::clearLoanDetail,
                     onBulkConfirm = viewModel::bulkConfirmPending,
                     onCreateFinance=viewModel::createInstallment,
-                    onOpenFinance={selected=3},
+                    onOpenFinance={selected=3;viewModel.openFinanceInstallments()},
                 )
                 2 -> AnalysisScreen(
                     state=state,
