@@ -22,6 +22,7 @@ object CategoryWorkbenchPolicy {
         aliases: Map<String,String>,
         platformRules: Map<Pair<Platform,String>,String>,
         crossPlatformRules: Map<String,String> = emptyMap(),
+        productRules: Map<Triple<Platform,String,String>,String> = emptyMap(),
     ): CategoryReviewItem {
         if(tx.flowType!=FlowType.EXPENSE) return CategoryReviewItem(
             tx,null,"","非个人消费",false,manuallyEdited
@@ -34,12 +35,16 @@ object CategoryWorkbenchPolicy {
         val cross=if(mixed || tx.platform !in setOf(Platform.WECHAT,Platform.ALIPAY))
             null else crossPlatformRules[canonical]
         val generic=if(mixed)null else merchantRules[canonical] ?: merchantRules[raw]
-        val saved=(platformRule ?: cross ?: generic)?.takeUnless {it=="其他"}
+        val product=productRules[Triple(tx.platform,canonical,
+            MerchantLexicon.normalize(tx.description))]
+        val saved=(product ?: platformRule ?: cross ?: generic)
+            ?.takeUnless {it=="其他"}
         val hit=MerchantLexicon.explain(tx.counterparty,tx.description)
         val proposal=saved ?: hit?.category?.takeUnless {it=="其他"}
         val term=if(saved!=null) tx.counterparty else hit?.matchedTerm.orEmpty()
         val basis=when {
             manuallyEdited -> "使用你已确认的消费分类"
+            product!=null -> "使用你保存的商品分类"
             saved!=null -> "使用你保存的商户分类"
             hit?.conflict==true -> "发现多个类别冲突，需核对：" + term
             hit!=null -> "匹配到：" + term + " · " + hit.source
