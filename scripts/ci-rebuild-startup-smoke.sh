@@ -37,7 +37,8 @@ db.close()
 print("Seeded real V0.2.6 schema with a sample merchant bill")
 PY
 adb shell run-as "$APP" rm -f databases/bill_insight.db-wal databases/bill_insight.db-shm
-adb shell -T run-as "$APP" sh -c 'cat > databases/bill_insight.db' < /tmp/ledger-v12.db
+# Stream into the sandbox through dd, avoiding adb remote-shell quoting/redirection.
+adb shell -T run-as "$APP" dd "of=/data/user/0/$APP/databases/bill_insight.db" bs=65536 < /tmp/ledger-v12.db
 
 # Update in place: the app ID and debug signing key stay identical.
 adb install -r app/build/outputs/apk/debug/app-debug.apk

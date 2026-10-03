@@ -30,7 +30,7 @@ jobs:
       - name: Boot V0.2.6, seed ledger and upgrade to rebuilt app
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 36
           target: google_apis
           arch: x86_64
           disable-animations: true
