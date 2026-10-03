@@ -119,8 +119,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
 
     LaunchedEffect(state.message) {
         state.message?.let { msg ->
-            val action=if(msg.contains("可撤销") &&
-                state.latestCategoryBatch!=null)"撤销" else null
+            val action=if(msg.contains("可撤销"))"撤销" else null
             val result=snackbar.showSnackbar(msg,actionLabel=action,
                 withDismissAction=action!=null)
             viewModel.clearMessage()
