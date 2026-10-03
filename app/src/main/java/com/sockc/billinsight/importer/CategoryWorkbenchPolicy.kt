@@ -73,9 +73,9 @@ object CategoryWorkbenchPolicy {
         }
         return CategoryReviewItem(
             tx,proposal,term,basis,
-            tx.category=="其他" || (!manuallyEdited &&
-                (hit?.conflict==true ||
-                    (proposal!=null && proposal!=tx.category))),
+            !manuallyEdited && (tx.category=="其他" ||
+                hit?.conflict==true ||
+                (proposal!=null && proposal!=tx.category)),
             manuallyEdited
         )
     }
