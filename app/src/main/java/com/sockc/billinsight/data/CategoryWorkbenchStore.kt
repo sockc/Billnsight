@@ -179,13 +179,14 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
             },SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-    fun rememberImportedEvidence(tx:Transaction,category:String) {
-        if(tx.flowType!=FlowType.EXPENSE || tx.id<=0)return
+    fun rememberImportedEvidence(tx:Transaction,category:String):Boolean {
+        if(tx.flowType!=FlowType.EXPENSE || tx.id<=0)return false
         val review=evaluate(tx,false,rules())
         saveEvidence(tx,category,review.matchedTerm,
             if(review.proposedCategory==category)review.basis
                 else "原始导入分类；需核对",
             category=="其他" || review.proposedCategory!=category)
+        return category=="其他" || review.needsReview
     }
 
     private fun setCategory(
