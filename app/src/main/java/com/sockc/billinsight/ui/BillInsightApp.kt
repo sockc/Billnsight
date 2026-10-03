@@ -27,6 +27,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.time.LocalDate
 import com.sockc.billinsight.BillInsightViewModel
 import com.sockc.billinsight.ui.screens.FinancialCenterScreen
+import com.sockc.billinsight.ui.screens.CategoryOrganizerScreen
 import com.sockc.billinsight.ui.screens.AnalysisScreen
 import com.sockc.billinsight.ui.screens.HomeScreen
 import com.sockc.billinsight.ui.screens.SettingsScreen
@@ -76,7 +78,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
             Destination("首页", Icons.Outlined.Home),
             Destination("流水", Icons.Outlined.ReceiptLong),
             Destination("分析", Icons.Outlined.BarChart),
-            Destination("金融中心", Icons.Outlined.AccountBalance),
+            Destination("金融", Icons.Outlined.AccountBalance),
             Destination("我的", Icons.Outlined.PersonOutline),
         )
     }
@@ -116,9 +118,14 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
     }
 
     LaunchedEffect(state.message) {
-        state.message?.let {
-            snackbar.showSnackbar(it)
+        state.message?.let { msg ->
+            val action=if(msg.contains("可撤销") &&
+                state.latestCategoryBatch!=null)"撤销" else null
+            val result=snackbar.showSnackbar(msg,actionLabel=action,
+                withDismissAction=action!=null)
             viewModel.clearMessage()
+            if(result==SnackbarResult.ActionPerformed)
+                viewModel.undoLastCategoryBatch()
         }
     }
 
@@ -282,10 +289,22 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onSaveSplit=viewModel::saveLoanDetail,
                     onClearSplit=viewModel::clearLoanDetail
                 )
+                "organize" -> CategoryOrganizerScreen(
+                    state=state,
+                    onBack={viewModel.closeCategoryOrganizer();detailPage=null},
+                    onRefresh=viewModel::openCategoryOrganizer,
+                    onApplyPreview=viewModel::applyCategoryReviewPreview,
+                    onUndo=viewModel::undoLastCategoryBatch,
+                    onPreviewTransaction=viewModel::previewExpenseCategory,
+                    onChangeCategory=viewModel::changeExpenseCategory,
+                )
                 "rules" -> RuleCenterScreen(
                     state=state,onBack={detailPage=null},
                     onPreview=viewModel::previewCategoryRule,
-                    onReclassify=viewModel::reclassifyOtherExpenses,
+                    onReclassify={ _ ->
+                        detailPage="organize"
+                        viewModel.openCategoryOrganizer()
+                    },
                     onSaveCategory=viewModel::saveCategoryRule,
                     onDeleteCategory=viewModel::deleteCategoryRule,
                     onDeletePlatformCategory=viewModel::deletePlatformCategoryRule,
@@ -321,6 +340,14 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onOpenAnalysis={selected=2},
                     onSelectMonth=viewModel::setHomeMonth,
                     onSelectPeriod=viewModel::setHomePeriod,
+                    onOpenOrganize={
+                        detailPage="organize"
+                        viewModel.openCategoryOrganizer()
+                    },
+                    onOpenFinance={
+                        selected=3
+                        viewModel.openFinanceInstallments()
+                    },
                     onOpenLedgerFilter={ filter ->
                         reviewMode=false
                         viewModel.setSearchFlowFilter(filter)
@@ -362,7 +389,15 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onSelectPeriod=viewModel::setHomePeriod,
                     onChangeExpenseCategory=viewModel::changeExpenseCategory,
                     onPreviewExpenseCategory=viewModel::previewExpenseCategory,
-                    onReclassify=viewModel::reclassifyOtherExpenses,
+                    onOpenOrganize={
+                        detailPage="organize"
+                        viewModel.openCategoryOrganizer()
+                    },
+                    onOpenFinance={
+                        selected=3
+                        viewModel.openFinanceInstallments()
+                    },
+                    onOpenTrends={detailPage="trends"},
                 )
                 3 -> FinancialCenterScreen(
                     state=state,
@@ -395,6 +430,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onOpenCredit={detailPage="credit"},
                     onOpenLoan={detailPage="loans"},
                     onOpenRules={detailPage="rules"},
+                    onOpenOrganize={detailPage="organize";viewModel.openCategoryOrganizer()},
                     onOpenTrends={detailPage="trends"},
                     onOpenScan={detailPage="scan"},
                 )
