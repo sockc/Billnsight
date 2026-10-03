@@ -65,6 +65,19 @@ object MerchantLexicon {
         val conflict: Boolean = false,
     )
 
+    fun canRememberProductDescription(description:String):Boolean {
+        val text=normalize(description)
+        if(text.length<4)return false
+        val generic=setOf(
+            "扫码支付","二维码付款","二维码收款","商户消费",
+            "商品订单","支付订单","京东订单","美团订单",
+            "京东商城","淘宝商城","美团收银","订单付款"
+        )
+        if(text in generic)return false
+        if(text.matches(Regex("(?:支付)?订单[0-9a-z-]+")))return false
+        return true
+    }
+
     private data class Hit(
         val category: String,
         val score: Int,
