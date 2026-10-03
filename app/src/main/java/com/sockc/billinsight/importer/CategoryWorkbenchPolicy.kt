@@ -60,7 +60,7 @@ object CategoryWorkbenchPolicy {
         val generic=if(mixed)null else merchantRules[canonical] ?: merchantRules[raw]
         val product=productRules[Triple(tx.platform,canonical,
             MerchantLexicon.normalize(tx.description))]
-        val saved=(product ?: platformRule ?: cross ?: generic)
+        val saved=(product ?: cross ?: platformRule ?: generic)
             ?.takeUnless {it=="其他"}
         val hit=MerchantLexicon.explain(tx.counterparty,tx.description)
         val proposal=saved ?: hit?.category?.takeUnless {it=="其他"}
@@ -69,6 +69,8 @@ object CategoryWorkbenchPolicy {
         val basis=when {
             manuallyEdited -> "使用你已确认的消费分类"
             product!=null -> "使用你保存的商品分类 · 匹配到："+term
+            cross!=null -> "使用你保存的跨平台商户分类 · 匹配到："+term
+            platformRule!=null -> "使用你保存的同平台商户分类 · 匹配到："+term
             saved!=null -> "使用你保存的商户分类 · 匹配到："+term
             hit?.conflict==true -> "发现多个类别冲突，需核对：" + term
             hit!=null -> "匹配到：" + term + " · " + hit.source
