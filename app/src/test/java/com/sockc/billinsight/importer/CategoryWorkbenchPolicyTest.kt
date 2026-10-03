@@ -57,6 +57,17 @@ class CategoryWorkbenchPolicyTest {
         assertTrue(result.manuallyEdited)
         assertTrue(result.basis.contains("已确认"))
     }
+    @Test fun explicitlyConfirmedCrossPlatformRuleOverridesOlderPlatformRule() {
+        val tx=expense("瑞幸咖啡","付款")
+        val key=MerchantCategoryPolicy.normalize(tx.counterparty)
+        val result=CategoryWorkbenchPolicy.evaluate(
+            tx,false,emptyMap(),emptyMap(),
+            mapOf((Platform.WECHAT to key) to "餐饮"),
+            mapOf(key to "饮品")
+        )
+        assertEquals("饮品",result.proposedCategory)
+        assertTrue(result.basis.contains("跨平台"))
+    }
     @Test fun savedRuleExplainsWhyItWasUsed() {
         val tx=expense("隆江猪脚饭","付款")
         val result=check(tx,saved=mapOf(
