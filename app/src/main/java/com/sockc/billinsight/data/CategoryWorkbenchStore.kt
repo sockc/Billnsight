@@ -139,7 +139,7 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
         ).use {c->while(c.moveToNext()){
             val tx=c.tx()
             val manual=c.getInt(c.getColumnIndexOrThrow("nature_modified"))!=0
-            if(manual && tx.category!="其他")continue
+            if(!MerchantCategoryPolicy.canReplaceHistorical(tx,manual))continue
             val other=MerchantCategoryPolicy.normalize(tx.counterparty)
             val identity=MerchantCategoryPolicy.normalize(r.aliases[other]?:other)
             if(identity!=canonical)continue
@@ -284,7 +284,7 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
                             else ->identity==canonical &&
                                 !CategoryWorkbenchPolicy.isMixedMerchant(tx.counterparty)
                         }
-                        if(same && (!manual || tx.category=="其他" || tx.id==selected.id))
+                        if(same && (MerchantCategoryPolicy.canReplaceHistorical(tx,manual) || tx.id==selected.id))
                             plans.add(tx)
                     }}
                 }
