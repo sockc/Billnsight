@@ -47,6 +47,11 @@ class CategoryWorkbenchPolicyTest {
         assertNull(check(payment).proposedCategory)
         assertFalse(check(payment).needsReview)
     }
+    @Test fun explicitlyReviewedOtherIsNotPerpetuallyPending() {
+        val reviewed=check(expense("张三","扫码付款",category="其他"),true)
+        assertTrue(reviewed.manuallyEdited)
+        assertFalse(reviewed.needsReview)
+    }
     @Test fun manualMeaningfulCategoryRemainsProtected() {
         val result=check(expense("瑞幸咖啡","拿铁",category="餐饮"),true)
         assertTrue(result.manuallyEdited)
