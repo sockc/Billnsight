@@ -24,6 +24,20 @@ class TransactionClassifierTest {
         assertEquals("餐饮",tx.category)
     }
 
+    @Test fun sellersQrReceiptMemoOnAnOutgoingPaymentIsExpense() {
+        val payment=TransactionClassifier.classify(
+            "支出","商户消费","缤纷生鲜汇",
+            "收款方备注:二维码收款","成功",emptyMap()
+        )
+        assertEquals(com.sockc.billinsight.model.FlowType.EXPENSE,payment.flowType)
+        assertEquals("商超日用",payment.category)
+        val incoming=TransactionClassifier.classify(
+            "收入","二维码收款","张三",
+            "收钱码","成功",emptyMap()
+        )
+        assertEquals(com.sockc.billinsight.model.FlowType.INCOME,incoming.flowType)
+    }
+
     @Test fun phoneTopUpIsRealExpense() {
         val result = TransactionClassifier.classify(
             "支出", "手机充值", "中国联合网络通信有限公司",

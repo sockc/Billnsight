@@ -9,6 +9,8 @@ object ScanPaymentClassifier {
         "二维码付款", "扫码付款", "扫一扫付款", "付款码付款", "扫码支付",
         "二维码支付", "扫二维码", "扫码转账", "扫码消费", "个人收款码", "商家收款码",
         "收款码付款", "收款码支付", "面对面付款", "收钱码付款",
+        // Payee-side QR receipt descriptions in a payer's outgoing statement:
+        "二维码收款",
     )
     private val generic = setOf(
         "", "/", "-", "--", "未知", "未知商户", "未知收款方",

@@ -85,7 +85,9 @@ object TransactionClassifier {
         if (qrReceipt && incoming) return Classification(FlowType.INCOME, "扫码收入")
         // Paying a friend's personal collection QR is normally a purchase too.
         // Transfer wording does not overrule explicit outgoing QR evidence.
-        if (qrPayment && outgoing) {
+        // Outgoing payer statements may describe the payee's "二维码收款".
+        // That does not turn our outgoing payment into incoming QR income.
+        if ((qrPayment || qrReceipt) && outgoing) {
             val rule = merchant.takeUnless(ScanPaymentClassifier::isGenericCounterparty)
                 ?.let { name -> merchantRules.entries.firstOrNull {
                     MerchantCategoryPolicy.normalize(it.key) == MerchantCategoryPolicy.normalize(name)
