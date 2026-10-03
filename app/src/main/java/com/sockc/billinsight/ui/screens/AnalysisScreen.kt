@@ -306,9 +306,9 @@ private fun OverviewAmountCard(title:String,amount:Long,subtitle:String) {
 private fun AnalysisEditableTransaction(tx:Transaction,onEdit:(Transaction)->Unit) {
     TransactionCard(
         tx,
-        onCategoryClick={onEdit(tx)},
+        onCategoryClick=if(tx.flowType==FlowType.EXPENSE) ({onEdit(tx)}) else null,
         trailing={
-            TextButton(onClick={onEdit(tx)}) {
+            if(tx.flowType==FlowType.EXPENSE) TextButton(onClick={onEdit(tx)}) {
                 Text("修改分类",style=MaterialTheme.typography.labelMedium)
             }
         }
