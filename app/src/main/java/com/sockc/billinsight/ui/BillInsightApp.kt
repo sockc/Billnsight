@@ -293,6 +293,7 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     state=state,
                     onBack={viewModel.closeCategoryOrganizer();detailPage=null},
                     onRefresh=viewModel::openCategoryOrganizer,
+                    onLoadMore=viewModel::loadMoreCategoryReview,
                     onApplyPreview=viewModel::applyCategoryReviewPreview,
                     onUndo=viewModel::undoLastCategoryBatch,
                     onPreviewTransaction=viewModel::previewExpenseCategory,
