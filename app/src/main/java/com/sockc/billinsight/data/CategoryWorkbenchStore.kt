@@ -98,7 +98,8 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
             val tx=item.transaction
             val name=MerchantCategoryPolicy.normalize(tx.counterparty)
             val canonical=MerchantCategoryPolicy.normalize(r.aliases[name]?:name)
-            if(CategoryWorkbenchPolicy.isMixedMerchant(tx.counterparty))
+            if(item.purposeWarning!=null ||
+                CategoryWorkbenchPolicy.isMixedMerchant(tx.counterparty))
                 "single:${tx.id}"
             else "${tx.platform.name}:${canonical}:${item.proposedCategory.orEmpty()}"
         }.map {(key,items)->
@@ -339,7 +340,8 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
     fun applyAutomaticPreview(limit:Int=8000):CategoryChangeBatch {
         val preview=reviewPreview(limit)
         val candidates=preview.groups.flatMap {it.items}
-            .filter {!it.manuallyEdited && it.proposedCategory!=null &&
+            .filter {!it.manuallyEdited && it.purposeWarning==null &&
+                it.proposedCategory!=null &&
                 it.proposedCategory!=it.transaction.category &&
                 !it.basis.startsWith("发现多个类别冲突")}
             .distinctBy {it.transaction.id}
