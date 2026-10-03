@@ -2,6 +2,7 @@ package com.sockc.billinsight
 
 import android.app.Application
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sockc.billinsight.analysis.ProductAnalysis
@@ -120,8 +121,9 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             val previousTrendLabel=if(sameScope) _uiState.value.trendSelectionLabel
                 else null
             _uiState.value = _uiState.value.copy(isLoading = true)
-            val state = withContext(Dispatchers.IO) {
-                synchronized(db) {
+            val state = try {
+                withContext(Dispatchers.IO) {
+                    synchronized(db) {
                 if(financeNeedsAutoSync) {
                     financeStore.syncVerifiedHistory()
                     financeNeedsAutoSync=false
@@ -212,6 +214,25 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     message = previousMessage,
                 )
                 }
+                }
+            } catch (cancelled: java.util.concurrent.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // Never let a malformed or unupgradable user database crash the process.
+                // Keep the original files untouched and show a shareable diagnostic.
+                Log.e("BillInsightStartup", "账本启动加载失败", error)
+                if (ticket == latestRefresh) {
+                    val trace = error.stackTrace.take(6).joinToString("\n") {
+                        it.className + "." + it.methodName + ":" + it.lineNumber
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        startupError = error.javaClass.simpleName +
+                            ": " + (error.message ?: "无详细错误").take(360) +
+                            "\n" + trace
+                    )
+                }
+                return@launch
             }
             if (ticket == latestRefresh) _uiState.value = state
         }
@@ -1055,6 +1076,7 @@ data class BillUiState(
     val recurringExpenses: List<RecurringExpense> = emptyList(),
     val totalStored: Int = 0,
     val isLoading: Boolean = true,
+    val startupError: String? = null,
     val message: String? = null,
     val needsZipPassword: Boolean = false,
 )

@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -36,6 +39,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.time.LocalDate
@@ -58,6 +65,7 @@ private data class Destination(val label: String, val icon: ImageVector)
 @Composable
 fun BillInsightApp(viewModel: BillInsightViewModel) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     var selected by remember { mutableIntStateOf(0) }
     var detailPage by remember { mutableStateOf<String?>(null) }
     BackHandler(enabled=detailPage!=null) { detailPage=null }
@@ -228,7 +236,29 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            when (detailPage) {
+            if (state.startupError != null) {
+                Column(
+                    modifier=Modifier.fillMaxSize().padding(24.dp),
+                    verticalArrangement=Arrangement.Center,
+                    horizontalAlignment=Alignment.CenterHorizontally
+                ) {
+                    Text("账本初始化失败", style=MaterialTheme.typography.titleLarge)
+                    Text("你的账单数据没有被清除。请复制以下错误信息进行排查；不要卸载或清除应用数据。",
+                        modifier=Modifier.padding(top=12.dp, bottom=16.dp))
+                    Text(state.startupError.orEmpty().take(1200),
+                        style=MaterialTheme.typography.bodySmall,
+                        modifier=Modifier.padding(bottom=16.dp))
+                    Button(onClick={viewModel.refresh()}) { Text("重试加载") }
+                    OutlinedButton(onClick={
+                        val clipboard=context.getSystemService(Context.CLIPBOARD_SERVICE)
+                            as? ClipboardManager
+                        clipboard?.setPrimaryClip(
+                            ClipData.newPlainText("BillInsight 启动诊断",state.startupError)
+                        )
+                    }) { Text("复制故障信息") }
+                    TextButton(onClick=startBackup) { Text("尝试导出加密账本备份") }
+                }
+            } else when (detailPage) {
                 "credit" -> CreditCenterScreen(
                     state=state,
                     onBack={detailPage=null},
