@@ -492,22 +492,36 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         transaction:Transaction, category:String, rememberMerchant:Boolean=true
     ) {
         val meaningfulMerchant=rememberMerchant &&
-            !ScanPaymentClassifier.isGenericCounterparty(transaction.counterparty)
+            !ScanPaymentClassifier.isGenericCounterparty(transaction.counterparty) &&
+            !com.sockc.billinsight.importer.CategoryWorkbenchPolicy.isMixedMerchant(
+                transaction.counterparty)
         viewModelScope.launch {
             val result=runCatching {
                 withContext(Dispatchers.IO) {
                     synchronized(db) {
-                        db.updateCategory(transaction.id,transaction.counterparty,
-                            category,meaningfulMerchant)
+                        if(transaction.flowType==FlowType.EXPENSE &&
+                            transaction.sourceFile!="手动记账") {
+                            db.changeExpenseCategory(transaction.id,category,
+                                if(meaningfulMerchant) "MERCHANT" else "SINGLE")
+                        } else {
+                            db.updateCategory(transaction.id,transaction.counterparty,
+                                category,false)
+                            1
+                        }
                     }
                 }
             }
             _uiState.value=_uiState.value.copy(
                 message=result.fold(
-                    onSuccess={
+                    onSuccess={count->
                         "已改为 "+category+
-                            if(meaningfulMerchant) "，并记住该商户" else "（仅此交易）"
-                    },
+                            if(meaningfulMerchant && transaction.sourceFile!="手动记账")
+                                "；修改 $count 笔并记住该商户，可撤销"
+                            else if(transaction.sourceFile!="手动记账" &&
+                                transaction.flowType==FlowType.EXPENSE)
+                                "（仅此交易，可撤销）"
+                            else "（仅此交易）"
+                    }
                     onFailure={ it.message?:"分类保存失败" }
                 )
             )
