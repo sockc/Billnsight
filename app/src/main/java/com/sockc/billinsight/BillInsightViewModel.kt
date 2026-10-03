@@ -61,6 +61,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     private val db = BillDatabase(application)
     private val financeStore = FinancePlanStore(db)
     private var organizerOpened=false
+    private var categoryReviewLimit=8000
     private var financeNeedsAutoSync=true
     private var financeViewOpened=false
     private val importer = BillImporter(application, application.contentResolver)
@@ -147,7 +148,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     categoryPreviewCount=previousCategoryPreviewCount,
                     categoryPreview=previousCategoryPreview,
                     categoryReviewPreview=if(organizerOpened)
-                        db.categoryReviewPreview(8000) else previousReview,
+                        db.categoryReviewPreview(categoryReviewLimit) else previousReview,
                     pendingCategoryCount=db.pendingCategoryCount(),
                     latestCategoryBatch=db.latestCategoryBatch(),
                     categoryEvidence=db.categoryEvidence(
@@ -552,6 +553,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
 
     fun closeCategoryOrganizer() {
         organizerOpened=false
+        categoryReviewLimit=8000
         _uiState.value=_uiState.value.copy(categoryReviewPreview=null)
     }
 
@@ -563,7 +565,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 categoryReviewLoading=true,categoryReviewPreview=null
             )
             val result=runCatching {withContext(Dispatchers.IO) {
-                synchronized(db){db.categoryReviewPreview(8000)}
+                synchronized(db){db.categoryReviewPreview(categoryReviewLimit)}
             }}
             _uiState.value=_uiState.value.copy(
                 categoryReviewLoading=false,
@@ -573,13 +575,19 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun loadMoreCategoryReview() {
+        if(_uiState.value.categoryReviewLoading)return
+        categoryReviewLimit=(categoryReviewLimit+8000).coerceAtMost(100000)
+        openCategoryOrganizer()
+    }
+
     fun applyCategoryReviewPreview() {
         val preview=_uiState.value.categoryReviewPreview?:return
         if(_uiState.value.isLoading || _uiState.value.categoryReviewLoading)return
         viewModelScope.launch {
             _uiState.value=_uiState.value.copy(categoryReviewLoading=true)
             val result=runCatching {withContext(Dispatchers.IO) {
-                synchronized(db){db.applyCategoryReviewPreview(8000)}
+                synchronized(db){db.applyCategoryReviewPreview(categoryReviewLimit)}
             }}
             _uiState.value=_uiState.value.copy(
                 categoryReviewLoading=false,categoryReviewPreview=null,
