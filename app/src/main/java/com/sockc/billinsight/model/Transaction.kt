@@ -122,6 +122,8 @@ data class ImportResult(
     val endAt: Long? = null,
     val qrExpenseCount: Int = 0,
     val qrMerchantReviewCount: Int = 0,
+    val autoClassified:Int=0,
+    val pendingOrganize:Int=0,
 )
 
 data class ProductGroup(
