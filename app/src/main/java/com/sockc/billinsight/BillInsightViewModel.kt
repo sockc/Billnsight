@@ -146,7 +146,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     categoryPreviewId=previousCategoryPreviewId,
                     categoryPreviewCount=previousCategoryPreviewCount,
                     categoryPreview=previousCategoryPreview,
-                    categoryReviewPreview=previousReview,
+                    categoryReviewPreview=if(organizerOpened)
+                        db.categoryReviewPreview(8000) else previousReview,
                     pendingCategoryCount=db.pendingCategoryCount(),
                     latestCategoryBatch=db.latestCategoryBatch(),
                     categoryEvidence=db.categoryEvidence(
@@ -545,11 +546,13 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 categoryPreview=null,
                 categoryReviewPreview=null,
             )
-            if(outcome.isSuccess){
-                organizerOpened=false
-                refresh()
-            }
+            if(outcome.isSuccess)refresh()
         }
+    }
+
+    fun closeCategoryOrganizer() {
+        organizerOpened=false
+        _uiState.value=_uiState.value.copy(categoryReviewPreview=null)
     }
 
     fun openCategoryOrganizer() {
@@ -585,7 +588,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     onFailure={ it.message?:"批量分类失败，原账单未更改" }
                 )
             )
-            if(result.isSuccess){refresh();openCategoryOrganizer()}
+            if(result.isSuccess)refresh()
         }
     }
 
@@ -602,7 +605,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     onFailure={ it.message?:"撤销失败，原始账单未修改" }
                 )
             )
-            if(result.isSuccess){organizerOpened=false;refresh()}
+            if(result.isSuccess)refresh()
         }
     }
 
