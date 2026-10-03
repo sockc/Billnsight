@@ -32,6 +32,7 @@ fun CategoryOrganizerScreen(
     onUndo:()->Unit,
     onPreviewTransaction:(Transaction)->Unit,
     onChangeCategory:(Transaction,String,String)->Unit,
+    onReviewPurpose:(Transaction)->Unit,
 ) {
     var confirmAll by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Transaction?>(null) }
@@ -153,7 +154,8 @@ fun CategoryOrganizerScreen(
                 onEdit={tx->
                     editing=tx
                     onPreviewTransaction(tx)
-                }
+                },
+                onReviewPurpose=onReviewPurpose
             )
         }
         item{Spacer(Modifier.height(20.dp))}
@@ -166,6 +168,7 @@ private fun CategoryReviewCard(
     expanded:Boolean,
     onToggle:()->Unit,
     onEdit:(Transaction)->Unit,
+    onReviewPurpose:(Transaction)->Unit,
 ){
     Card(Modifier.fillMaxWidth().padding(horizontal=16.dp),
         shape=RoundedCornerShape(17.dp)){
@@ -210,7 +213,11 @@ private fun CategoryReviewCard(
                         }
                         Text(item.transaction.amountCent.toYuanText(),
                             style=MaterialTheme.typography.bodySmall)
-                        TextButton(onClick={onEdit(item.transaction)}){Text("分类")}
+                        if(item.purposeWarning!=null)
+                            TextButton(onClick={onReviewPurpose(item.transaction)}){
+                                Text("核对用途")
+                            }
+                        else TextButton(onClick={onEdit(item.transaction)}){Text("分类")}
                     }
                     HorizontalDivider()
                 }
