@@ -372,7 +372,8 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
         items.distinctBy {it.id}.chunked(350).forEach {chunk->
             val ids=chunk.map {it.id }
             db.rawQuery(
-                """SELECT t.id,t.nature_modified,e.source,e.matched_term
+                """SELECT t.id,t.nature_modified,e.source,e.matched_term,
+                          e.applied_category
                    FROM transactions t
                    LEFT JOIN classification_evidence e ON e.transaction_id=t.id
                    WHERE t.id IN (${ids.joinToString(","){"?"}})""",
@@ -383,7 +384,9 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
                     val id=c.getLong(0)
                     val tx=byId[id]?:continue
                     val manual=c.getInt(1)!=0
-                    val stored=if(!c.isNull(2))c.getString(2) else null
+                    val stored=if(!c.isNull(2) &&
+                        !c.isNull(4) && c.getString(4)==tx.category)
+                        c.getString(2) else null
                     val term=if(!c.isNull(3))c.getString(3) else ""
                     result[id]=when {
                         manual -> "你已手动确认：${tx.category}"
