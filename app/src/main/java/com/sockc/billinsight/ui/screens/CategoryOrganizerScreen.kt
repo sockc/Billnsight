@@ -27,6 +27,7 @@ fun CategoryOrganizerScreen(
     state:BillUiState,
     onBack:()->Unit,
     onRefresh:()->Unit,
+    onLoadMore:()->Unit,
     onApplyPreview:()->Unit,
     onUndo:()->Unit,
     onPreviewTransaction:(Transaction)->Unit,
@@ -54,12 +55,11 @@ fun CategoryOrganizerScreen(
         title={Text("应用本次自动分类预览？")},
         text={
             Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-                Text("已扫描 ${report.scanned} 笔；建议调整 ${report.proposed} 笔。")
+                Text("已扫描 ${report.scanned}/${report.totalImported} 笔；建议调整 ${report.proposed} 笔。")
                 Text("保留 ${report.protected} 笔已有人工分类。"+
                     "所有更新都会记录修改前状态，支持撤销。")
                 Text("尚无明确依据或存在冲突的 ${report.unresolved} 笔不自动修改。")
-                if(report.scanned>=8000)Text("本次最多检查最近 8,000 笔历史消费；"+
-                    "请不要将本次数量视为全账本识别覆盖率。",
+                if(report.scanned<report.totalImported)Text("还有未检查的历史交易。可先返回继续扫描，或者只应用本次预览范围。",
                     style=MaterialTheme.typography.labelSmall,
                     color=MaterialTheme.colorScheme.error)
             }
@@ -106,7 +106,7 @@ fun CategoryOrganizerScreen(
                     else {
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                             Column {
-                                Text("扫描 ${report.scanned} 笔",
+                                Text("扫描 ${report.scanned}/${report.totalImported} 笔",
                                     style=MaterialTheme.typography.titleMedium)
                                 Text("其中建议调整 ${report.proposed} 笔",
                                     style=MaterialTheme.typography.labelSmall)
@@ -117,6 +117,11 @@ fun CategoryOrganizerScreen(
                                 Text("保护人工分类 ${report.protected} 笔",
                                     style=MaterialTheme.typography.labelSmall)
                             }
+                        }
+                        if(report.scanned<report.totalImported) OutlinedButton(
+                            enabled=!state.categoryReviewLoading && report.scanned<100000,
+                            onClick=onLoadMore,modifier=Modifier.fillMaxWidth()) {
+                            Text(if(report.scanned<100000)"继续检查更早的 8,000 笔" else "已达到单次扫描上限")
                         }
                         Button(enabled=report.proposed>0 && !state.categoryReviewLoading,
                             onClick={confirmAll=true},modifier=Modifier.fillMaxWidth()) {
