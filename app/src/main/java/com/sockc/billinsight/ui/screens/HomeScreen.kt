@@ -161,7 +161,7 @@ fun HomeScreen(
                 Row(Modifier.fillMaxWidth().padding(15.dp),
                     verticalAlignment=Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("待整理 · ${state.pendingCategoryCount} 笔其他消费",
+                        Text("待整理 · ${state.pendingCategoryCount} 笔待核对账单",
                             style=MaterialTheme.typography.titleSmall,
                             fontWeight=FontWeight.Bold)
                         Text("按商户批量核对并预览，保留已人工确认的分类",
