@@ -46,6 +46,20 @@ class ReportPeriodAndOutflowTest {
         }
     }
 
+    @Test fun selectedYearShowsAllTwelveMonths() {
+        assertEquals(
+            LocalDate.of(2023,1,1) to LocalDate.of(2023,12,31),
+            ReportPeriod.resolve("YEAR",YearMonth.of(2023,7),today=today)
+        )
+    }
+
+    @Test fun singleDayAndCrossYearMonthNavigation() {
+        val day=LocalDate.of(2023,12,31)
+        assertEquals(day to day,
+            ReportPeriod.resolve("DAY",YearMonth.of(2023,12),day,day,today))
+        assertEquals(YearMonth.of(2024,1),YearMonth.of(2023,12).plusMonths(1))
+    }
+
     @Test fun historicalFebruaryIncludesLeapDay() {
         assertEquals(
             LocalDate.of(2024,2,1) to LocalDate.of(2024,2,29),
