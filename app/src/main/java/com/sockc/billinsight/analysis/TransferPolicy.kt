@@ -12,8 +12,8 @@ object TransferPolicy {
         val self = tx.counterparty.lowercase() + " " + evidence
         if (listOf("余额宝", "零钱通", "本人账户", "我的账户", "账户互转",
                 "资金划转", "余利宝", "提现到", "信用卡还款", "贷款还款")
-                .any(self::contains)) return null
-        if (listOf("退款", "退回", "还款", "借款", "红包").any(evidence::contains))
+                .any { self.contains(it) }) return null
+        if (listOf("退款", "退回", "还款", "借款", "红包").any { evidence.contains(it) })
             return null
         if (originalType.contains("二维码") || originalType.contains("扫码")) return null
         val explicitlyTransfer = originalType.contains("转账") ||
