@@ -72,6 +72,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     private var homePeriodKey = "MONTH"
     private var homeCustomStart: LocalDate? = null
     private var homeCustomEnd: LocalDate? = null
+    private var selectedPersonKey:String?=null
+    private var selectedPersonDirection="ALL"
 
     private val _uiState = MutableStateFlow(BillUiState())
     val uiState: StateFlow<BillUiState> = _uiState.asStateFlow()
@@ -79,15 +81,18 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     init { refresh() }
 
     fun setHomePeriod(key: String, customStart: LocalDate? = null, customEnd: LocalDate? = null) {
-        require(key in setOf("MONTH","LAST_MONTH","LAST_7","YEAR","LAST_YEAR","CUSTOM","ALL_HISTORY"))
+        require(key in setOf("MONTH","LAST_MONTH","LAST_7","YEAR","LAST_YEAR","DAY","CUSTOM","ALL_HISTORY"))
         if (key == "CUSTOM") require(customStart != null && customEnd != null && !customStart.isAfter(customEnd))
+        if (key == "DAY") require(customStart!=null)
+        selectedPersonKey=null
         homePeriodKey=key
         homeCustomStart=customStart
         homeCustomEnd=customEnd
-        refresh()
+        refresh(month=customStart?.let{YearMonth.from(it)} ?: _uiState.value.month)
     }
 
     fun setHomeMonth(month: YearMonth) {
+        selectedPersonKey=null
         homePeriodKey="MONTH"
         homeCustomStart=null
         homeCustomEnd=null
@@ -135,6 +140,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 val thresholdCent = smallThresholdYuan * 100L
                 val categories = db.categoryTotals(month, platform)
                 val rangeRows = db.rangeTransactions(homeStartMillis,homeEndMillis,platform,10000)
+                val personReport=db.personTransferReport(homeStartMillis,homeEndMillis,platform)
+                val ownAccount=db.accountTransferTotals(homeStartMillis,homeEndMillis,platform)
                 val monthly = db.monthTransactions(month, platform)
                 val aliases = db.productAliases()
                 val merchantAliases = db.merchantAliases()
@@ -157,6 +164,20 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                     searchFlowFilter = searchFlowFilter,
                     searchLimit = searchLimit,
                     searchResults = searchRows,
+                    availableYears=db.availableBillYears(),
+                    personTransfers=personReport.second,
+                    personTransferTotals=personReport.first,
+                    accountTransferTotals=ownAccount,
+                    selectedPersonKey=selectedPersonKey,
+                    selectedPersonDirection=selectedPersonDirection,
+                    personTransferDetails=if(selectedPersonKey!=null && sameScope &&
+                        _uiState.value.homeStart==homeDates.first &&
+                        _uiState.value.homeEnd==homeDates.second)
+                        _uiState.value.personTransferDetails else emptyList(),
+                    personTransferHasMore=if(selectedPersonKey!=null && sameScope &&
+                        _uiState.value.homeStart==homeDates.first &&
+                        _uiState.value.homeEnd==homeDates.second)
+                        _uiState.value.personTransferHasMore else false,
                     monthlyTransactions = monthly,
                     periodTransactions = rangeRows,
                     periodCategories = db.rangeCategoryTotals(homeStartMillis,homeEndMillis,platform),
@@ -1187,8 +1208,54 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.value = _uiState.value.copy(needsZipPassword = false)
     }
 
-    fun previousMonth() = refresh(_uiState.value.month.minusMonths(1))
-    fun nextMonth() = refresh(_uiState.value.month.plusMonths(1))
+    /** The shared date selection applies to all three non-financial pages. */
+    fun previousMonth() = setHomeMonth(_uiState.value.month.minusMonths(1))
+    fun nextMonth() = setHomeMonth(_uiState.value.month.plusMonths(1))
+
+    fun openPersonTransfer(key:String,direction:String="ALL",append:Boolean=false) {
+        require(direction in setOf("ALL","IN","OUT"))
+        val snapshot=_uiState.value
+        val wasSame=selectedPersonKey==key && selectedPersonDirection==direction
+        val offset=if(append && wasSame) snapshot.personTransferDetails.size else 0
+        selectedPersonKey=key
+        selectedPersonDirection=direction
+        _uiState.value=snapshot.copy(
+            selectedPersonKey=key,selectedPersonDirection=direction,
+            personTransferDetails=if(offset>0)snapshot.personTransferDetails else emptyList(),
+            personTransferLoading=true,personTransferHasMore=false
+        )
+        viewModelScope.launch {
+            val result=runCatching {withContext(Dispatchers.IO) {
+                val zone=ZoneId.systemDefault()
+                val start=snapshot.homeStart.atStartOfDay(zone).toInstant().toEpochMilli()
+                val end=snapshot.homeEnd.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+                synchronized(db) {db.personTransferPage(key,start,end,snapshot.platformFilter,
+                    direction,41,offset)}
+            }}
+            if(selectedPersonKey==key && selectedPersonDirection==direction) {
+                val page=result.getOrDefault(emptyList())
+                _uiState.value=_uiState.value.copy(
+                    personTransferLoading=false,
+                    personTransferDetails=(if(offset>0)snapshot.personTransferDetails else emptyList())+
+                        page.take(40),
+                    personTransferHasMore=page.size>40,
+                    message=result.exceptionOrNull()?.message
+                )
+            }
+        }
+    }
+    fun confirmSameCounterparty(name:String) {
+        viewModelScope.launch {
+            val result=runCatching {withContext(Dispatchers.IO) {
+                synchronized(db){db.confirmSameCounterparty(name)}
+            }}
+            _uiState.value=_uiState.value.copy(
+                message=result.fold(
+                    onSuccess={"已合并微信和支付宝的同名往来"},onFailure={it.message?:"合并失败"})
+            )
+            if(result.isSuccess){selectedPersonKey=null;refresh()}
+        }
+    }
     fun clearMessage() { _uiState.value = _uiState.value.copy(message = null) }
 
     private fun formatDate(epochMillis: Long): String =
@@ -1208,6 +1275,15 @@ data class BillUiState(
     val latestCategoryBatch:CategoryChangeBatch? = null,
     val categoryEvidence:Map<Long,String> = emptyMap(),
     val homePeriod: String = "MONTH",
+    val availableYears:List<Int> = emptyList(),
+    val personTransferTotals:com.sockc.billinsight.analysis.TransferTotals = com.sockc.billinsight.analysis.TransferTotals(),
+    val accountTransferTotals:com.sockc.billinsight.analysis.TransferTotals = com.sockc.billinsight.analysis.TransferTotals(),
+    val personTransfers:List<com.sockc.billinsight.analysis.TransferPerson> = emptyList(),
+    val selectedPersonKey:String?=null,
+    val selectedPersonDirection:String="ALL",
+    val personTransferDetails:List<Transaction> = emptyList(),
+    val personTransferHasMore:Boolean=false,
+    val personTransferLoading:Boolean=false,
     val homeStart: LocalDate = LocalDate.now().withDayOfMonth(1),
     val homeEnd: LocalDate = LocalDate.now(),
     val homeSummary: DashboardSummary = DashboardSummary(),

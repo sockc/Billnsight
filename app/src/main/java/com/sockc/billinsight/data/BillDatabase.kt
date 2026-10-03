@@ -31,6 +31,9 @@ import com.sockc.billinsight.importer.MerchantNaturePolicy
 import com.sockc.billinsight.model.LoanRepaymentDetail
 import com.sockc.billinsight.model.LoanRepaymentPolicy
 import com.sockc.billinsight.analysis.MerchantAnalysis
+import com.sockc.billinsight.analysis.TransferPolicy
+import com.sockc.billinsight.analysis.TransferPerson
+import com.sockc.billinsight.analysis.TransferTotals
 import com.sockc.billinsight.model.LinkKind
 import com.sockc.billinsight.model.ExpenseLink
 import com.sockc.billinsight.model.MerchantTotal
@@ -87,6 +90,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         createPlatformCategoryRulesTable(db)
         createInstallmentTables(db)
         createClassificationTables(db)
+        createTransferTables(db)
         db.execSQL(
             """
             CREATE TABLE merchant_rules (
@@ -206,6 +210,13 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         if (oldVersion < 12) createPlatformCategoryRulesTable(db)
         if (oldVersion < 13) createInstallmentTables(db)
         if (oldVersion < 14) createClassificationTables(db)
+        if (oldVersion < 15) {
+            createTransferTables(db)
+            db.query("transactions",null,"flow_type IN ('EXPENSE','INCOME')",null,
+                null,null,null).use { c ->
+                while(c.moveToNext()) registerPersonTransfer(db,c.toTransaction())
+            }
+        }
     }
 
     private fun createInstallmentTables(db: SQLiteDatabase) {
@@ -992,6 +1003,7 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     // Credit defaults are repaired in one batch after importing.
                 } else {
                     inserted++
+                    registerPersonTransfer(writableDatabase,item.copy(id=id))
                     when(item.flowType) {
                         FlowType.EXPENSE -> if(classificationStore.rememberImportedEvidence(
                             item.copy(id=id),item.category
@@ -2346,6 +2358,14 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
             "id=?",
             arrayOf(id.toString())
         )
+        if(flowType !in setOf(FlowType.EXPENSE,FlowType.INCOME)) {
+            writableDatabase.delete("person_transfer_tags","transaction_id=?",arrayOf(id.toString()))
+        } else {
+            writableDatabase.query("transactions",null,"id=?",arrayOf(id.toString()),
+                null,null,null).use { c ->
+                if(c.moveToFirst()) registerPersonTransfer(writableDatabase,c.toTransaction())
+            }
+        }
     }
 
     fun updateCategory(id: Long, merchant: String, category: String, rememberMerchant: Boolean) {
@@ -2415,6 +2435,125 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                 }
             }
         }
+    }
+
+
+    /** Independent purpose tags: a later shopping-category correction never changes transfers. */
+    private fun createTransferTables(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE IF NOT EXISTS person_transfer_tags(
+            transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
+            direction TEXT NOT NULL CHECK(direction IN ('IN','OUT'))
+        )""")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS counterparty_aliases(
+            platform TEXT NOT NULL, raw_name TEXT NOT NULL, canonical TEXT NOT NULL,
+            PRIMARY KEY(platform,raw_name)
+        )""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_person_transfer_direction ON person_transfer_tags(direction)")
+    }
+
+    private fun registerPersonTransfer(db:SQLiteDatabase,tx:Transaction) {
+        val direction=TransferPolicy.personDirection(tx) ?: return
+        db.insertWithOnConflict("person_transfer_tags",null,ContentValues().apply {
+            put("transaction_id",tx.id);put("direction",direction)
+        },SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** Years are read from the actual ledger, not a hard-coded recent-year selector. */
+    fun availableBillYears():List<Int> =
+        readableDatabase.rawQuery("""SELECT DISTINCT CAST(strftime('%Y',occurred_at/1000,
+              'unixepoch','localtime') AS INTEGER) FROM transactions
+              ORDER BY 1 DESC""",null).use {c->
+            buildList {while(c.moveToNext()) if(!c.isNull(0)) add(c.getInt(0))}
+        }
+
+    /** Global account-to-account flows; keep these out of person-to-person rankings. */
+    fun accountTransferTotals(start:Long,end:Long,platform:Platform?=null):TransferTotals {
+        val filter=if(platform==null) "" else " AND platform=?"
+        val args=(listOf(start.toString(),end.toString())+
+                listOfNotNull(platform?.name)).toTypedArray()
+        return readableDatabase.rawQuery("""SELECT
+          COALESCE(SUM(CASE WHEN direction_text LIKE '%支出%' THEN amount_cent ELSE 0 END),0),
+          COALESCE(SUM(CASE WHEN direction_text LIKE '%收入%' THEN amount_cent ELSE 0 END),0),
+          SUM(CASE WHEN direction_text LIKE '%支出%' THEN 1 ELSE 0 END),
+          SUM(CASE WHEN direction_text LIKE '%收入%' THEN 1 ELSE 0 END)
+          FROM transactions WHERE flow_type='TRANSFER' AND occurred_at>=?
+          AND occurred_at<?$filter""",args).use {c->c.moveToFirst()
+          TransferTotals(c.getLong(0),c.getLong(1),c.getInt(2),c.getInt(3))
+        }
+    }
+
+    private val personGroupSql = "COALESCE(a.canonical,t.platform || ':' || TRIM(t.counterparty))"
+
+    /** Aggregate the entire indexed ledger; no LIMIT on money totals or rankings. */
+    fun personTransferReport(start:Long,end:Long,platform:Platform?=null):
+            Pair<TransferTotals,List<TransferPerson>> {
+        val filter=if(platform==null) "" else " AND t.platform=?"
+        val args=(listOf(start.toString(),end.toString())+
+                listOfNotNull(platform?.name)).toTypedArray()
+        val groups=readableDatabase.rawQuery("""SELECT $personGroupSql,
+            MIN(CASE WHEN TRIM(t.counterparty)='' THEN '未知往来人' ELSE TRIM(t.counterparty) END),
+            GROUP_CONCAT(DISTINCT t.platform),
+            COALESCE(SUM(CASE WHEN p.direction='OUT' THEN t.amount_cent ELSE 0 END),0),
+            COALESCE(SUM(CASE WHEN p.direction='IN' THEN t.amount_cent ELSE 0 END),0),
+            SUM(CASE WHEN p.direction='OUT' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN p.direction='IN' THEN 1 ELSE 0 END)
+            FROM person_transfer_tags p JOIN transactions t ON t.id=p.transaction_id
+            LEFT JOIN counterparty_aliases a ON a.platform=t.platform
+                  AND a.raw_name=TRIM(t.counterparty)
+            WHERE t.occurred_at>=? AND t.occurred_at<?$filter
+              AND t.flow_type IN ('EXPENSE','INCOME')
+            GROUP BY $personGroupSql
+            ORDER BY 4+5 DESC""",args).use {c->
+            buildList {while(c.moveToNext()) add(TransferPerson(
+                c.getString(0),c.getString(1),c.getString(2) ?: "",
+                c.getLong(3),c.getLong(4),c.getInt(5),c.getInt(6)
+            ))}
+        }
+        return TransferTotals(groups.sumOf {it.sentCent},groups.sumOf {it.receivedCent},
+            groups.sumOf {it.sentCount},groups.sumOf {it.receivedCount}) to groups
+    }
+
+    /** OFFSET is applied only to opened detail rows, never to summary statistics. */
+    fun personTransferPage(key:String,start:Long,end:Long,platform:Platform?=null,
+                           direction:String="ALL",limit:Int=40,offset:Int=0):List<Transaction> {
+        require(direction in setOf("ALL","IN","OUT"))
+        val scope=if(platform==null) "" else " AND t.platform=?"
+        val dir=if(direction=="ALL") "" else " AND p.direction=?"
+        val args=mutableListOf(key,start.toString(),end.toString())
+        platform?.let {args+=it.name}
+        if(direction!="ALL")args+=direction
+        args+=limit.coerceIn(1,100).toString()
+        args+=offset.coerceAtLeast(0).toString()
+        return readableDatabase.rawQuery("""SELECT t.* FROM person_transfer_tags p
+          JOIN transactions t ON t.id=p.transaction_id
+          LEFT JOIN counterparty_aliases a ON a.platform=t.platform
+             AND a.raw_name=TRIM(t.counterparty)
+          WHERE $personGroupSql=? AND t.occurred_at>=? AND t.occurred_at<?
+          AND t.flow_type IN ('EXPENSE','INCOME')$scope$dir
+          ORDER BY t.occurred_at DESC,t.id DESC LIMIT ? OFFSET ?""",
+          args.toTypedArray()).use {c->buildList {while(c.moveToNext())add(c.toTransaction())}}
+    }
+
+    /** Cross-platform identity is merged only after an explicit user confirmation. */
+    fun confirmSameCounterparty(name:String) {
+        val raw=name.trim()
+        require(raw.isNotBlank() && raw.length<=80)
+        val platforms=readableDatabase.rawQuery("""SELECT DISTINCT t.platform FROM
+            person_transfer_tags p JOIN transactions t ON t.id=p.transaction_id
+            WHERE TRIM(t.counterparty)=? AND t.platform IN ('WECHAT','ALIPAY')""",
+            arrayOf(raw)).use {c->buildSet {while(c.moveToNext())add(c.getString(0))}}
+        require(platforms.size==2) {"尚未找到微信和支付宝两边的同名往来"}
+        writableDatabase.beginTransaction()
+        try {
+            platforms.forEach {platform->
+                writableDatabase.insertWithOnConflict("counterparty_aliases",null,
+                    ContentValues().apply {
+                        put("platform",platform);put("raw_name",raw)
+                        put("canonical","person:"+raw.lowercase(java.util.Locale.ROOT))
+                    },SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {writableDatabase.endTransaction()}
     }
 
     fun rangeTransactions(
@@ -2803,6 +2942,6 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
 
     companion object {
         private const val DB_NAME = "bill_insight.db"
-        private const val DB_VERSION = 14
+        private const val DB_VERSION = 15
     }
 }
