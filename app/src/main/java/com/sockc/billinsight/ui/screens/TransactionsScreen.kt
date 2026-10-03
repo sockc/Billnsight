@@ -72,6 +72,7 @@ fun TransactionsScreen(
 ) {
     var editing by remember { mutableStateOf<Transaction?>(null) }
     var editingCategory by remember { mutableStateOf<Transaction?>(null) }
+    var evidenceId by remember { mutableStateOf<Long?>(null) }
     var editingLoan by remember { mutableStateOf<Transaction?>(null) }
     var correctingAmount by remember { mutableStateOf<Transaction?>(null) }
     var financeSource by remember { mutableStateOf<Transaction?>(null) }
@@ -100,6 +101,7 @@ fun TransactionsScreen(
     editingCategory?.let { tx ->
         ExpenseCategoryDialog(transaction=tx,
             preview=if(state.categoryPreviewId==tx.id) state.categoryPreview else null,
+            evidence=state.categoryEvidence[tx.id].orEmpty(),
             onDismiss={editingCategory=null},
             onConfirm={ item, category, scope ->
                 onChangeExpenseCategory(item,category,scope)
@@ -252,7 +254,7 @@ fun TransactionsScreen(
                 }
                 TransactionCard(tx,
                     onMerchantClick={editing=tx},
-                    onCategoryClick=if(tx.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) ({
+                    onCategoryClick=if(tx.flowType==FlowType.EXPENSE) ({
                         editingCategory=tx
                         onPreviewExpenseCategory(tx)
                     }) else null,
@@ -270,6 +272,9 @@ fun TransactionsScreen(
                         }
                         if(tx.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) {
                             TextButton(onClick={
+                                evidenceId=if(evidenceId==tx.id)null else tx.id
+                            }) {Text("分类依据")}
+                            if(tx.flowType==FlowType.EXPENSE) TextButton(onClick={
                                 editingCategory=tx
                                 onPreviewExpenseCategory(tx)
                             }) {Text("修改分类")}
@@ -296,6 +301,12 @@ fun TransactionsScreen(
                         }
                     }
                     }
+                    if(evidenceId==tx.id) Text(
+                        state.categoryEvidence[tx.id] ?: "根据商户和商品描述生成分类；请核对原账单。",
+                        modifier=Modifier.padding(horizontal=12.dp,vertical=4.dp),
+                        style=MaterialTheme.typography.labelSmall,
+                        color=MaterialTheme.colorScheme.primary
+                    )
                 })
             }
         }

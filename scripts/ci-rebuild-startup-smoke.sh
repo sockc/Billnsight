@@ -67,7 +67,7 @@ adb logcat -c
 adb shell am start -W -n "$APP/.MainActivity"
 sleep 9
 adb shell pidof "$APP"
-check_home_screen "upgraded V0.3.4"
+check_home_screen "upgraded V0.3.5"
 
 # Exercise the actual newly added Finance Center UI. Merely launching the
 # process or dashboard would miss Compose/page-specific regressions.
@@ -77,7 +77,7 @@ coords=$(python3 - <<'PY'
 import re,xml.etree.ElementTree as ET
 root=ET.parse("/tmp/billinsight-ui.xml").getroot()
 nodes=[n for n in root.iter("node")
-       if n.attrib.get("text")=="金融中心" or n.attrib.get("content-desc")=="金融中心"]
+       if n.attrib.get("text") in ("金融","金融中心") or n.attrib.get("content-desc") in ("金融","金融中心")]
 assert nodes, "Finance Center bottom-navigation item not visible"
 bounds=nodes[-1].attrib["bounds"]
 l,t,r,b=map(int,re.findall(r"\d+",bounds))
@@ -110,12 +110,15 @@ python3 - <<'PY'
 import sqlite3
 db=sqlite3.connect("/tmp/ledger-v13.db")
 version=db.execute("PRAGMA user_version").fetchone()[0]
-assert version==13, f"Expected upgraded schema v13, got {version}"
+assert version==14, f"Expected upgraded schema v14, got {version}"
 row=db.execute("SELECT counterparty,amount_cent,category FROM transactions WHERE fingerprint='ci-smoke-fingerprint'").fetchone()
 assert row==("拾贰便利店",1200,"其他"), f"Original imported ledger changed or missing: {row}"
 tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-assert {"finance_installment_plans","finance_installment_links"}<=tables, tables
-print("PASS: V0.2.6 -> V0.3.4 Android boot; migration retained original ledger")
+assert {"finance_installment_plans","finance_installment_links",
+        "classification_evidence","category_change_batches",
+        "category_change_items","category_rule_changes",
+        "cross_platform_category_rules","product_category_rules"}<=tables, tables
+print("PASS: V0.2.6 -> V0.3.5 Android boot; v14 migration retained original ledger")
 db.close()
 PY
 

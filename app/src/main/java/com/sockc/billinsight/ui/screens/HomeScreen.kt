@@ -14,6 +14,8 @@ import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,9 +44,18 @@ fun HomeScreen(
     onSelectMonth: (YearMonth) -> Unit,
     onSelectPeriod: (String,LocalDate?,LocalDate?) -> Unit,
     onOpenLedgerFilter: (String) -> Unit,
+    onOpenOrganize:()->Unit,
+    onOpenFinance:()->Unit,
 ) {
+    var showAccounting by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val summary=state.homeSummary
     val repayment=summary.creditRepaymentCent+summary.loanRepaymentCent
+    if(showAccounting) AlertDialog(
+        onDismissRequest={showAccounting=false},
+        title={Text("统计口径")},
+        text={Text("总支出按已导入的实际对外付款计算；消费按购买发生时记录，信用卡、贷款还款按偿还日期计算。已识别的信用卡支付避免重复算入总支出；账户互转不是消费，代付收回不算个人收入。若账户数据不完整，金额只代表已记录账单。")},
+        confirmButton={TextButton(onClick={showAccounting=false}){Text("明白")}}
+    )
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(10.dp)) {
         item {
             DateScopeTitle("BillInsight","看清每一笔钱",state,onSelectMonth,onSelectPeriod)
@@ -91,7 +102,7 @@ fun HomeScreen(
                     }
                 }
                 Card(
-                    Modifier.fillMaxWidth().clickable {onOpenLedgerFilter("REPAYMENT")},
+                    Modifier.fillMaxWidth().clickable {onOpenFinance()},
                     shape=RoundedCornerShape(19.dp),
                     colors=CardDefaults.cardColors(
                         containerColor=MaterialTheme.colorScheme.surface)
@@ -122,12 +133,11 @@ fun HomeScreen(
             }
         }
         item {
-            Text(
-                "消费按购物发生时统计，还款按实际偿还时统计；已明确识别的信用卡消费不重复计入总支出。未提供付款账户的账单仍需核对。",
-                modifier=Modifier.padding(horizontal=20.dp),
-                style=MaterialTheme.typography.labelSmall,
-                color=MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            TextButton(onClick={showAccounting=true},
+                modifier=Modifier.padding(start=16.dp)) {
+                Text("ⓘ 总支出、消费和还款的统计口径",
+                    style=MaterialTheme.typography.labelSmall)
+            }
         }
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),
@@ -140,6 +150,25 @@ fun HomeScreen(
                 }
                 OutlinedButton(onClick=onOpenAnalysis,modifier=Modifier.weight(1f),
                     shape=RoundedCornerShape(14.dp)) {Text("收支分析 ›")}
+            }
+        }
+        if(state.pendingCategoryCount>0) item {
+            Card(Modifier.fillMaxWidth().padding(horizontal=16.dp)
+                .clickable(onClick=onOpenOrganize),
+                shape=RoundedCornerShape(16.dp),
+                colors=CardDefaults.cardColors(
+                    containerColor=MaterialTheme.colorScheme.secondaryContainer)) {
+                Row(Modifier.fillMaxWidth().padding(15.dp),
+                    verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("待整理 · ${state.pendingCategoryCount} 笔待核对账单",
+                            style=MaterialTheme.typography.titleSmall,
+                            fontWeight=FontWeight.Bold)
+                        Text("按商户批量核对并预览，保留已人工确认的分类",
+                            style=MaterialTheme.typography.labelSmall)
+                    }
+                    Icon(Icons.Outlined.ChevronRight,contentDescription="进入待整理")
+                }
             }
         }
         item {

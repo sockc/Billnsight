@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sockc.billinsight.BillUiState
 import com.sockc.billinsight.importer.ScanPaymentClassifier
+import com.sockc.billinsight.importer.CategoryWorkbenchPolicy
 import com.sockc.billinsight.model.Platform
 import com.sockc.billinsight.model.Transaction
 import com.sockc.billinsight.util.toYuanText
@@ -285,7 +286,7 @@ fun ScanCenterScreen(
                 Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),
                     verticalAlignment=Alignment.CenterVertically) {
                     Checkbox(checked=remembered,onCheckedChange={remembered=it})
-                    Text("同一明确商户记住分类；通用二维码名称仅修改这一笔",
+                    Text("明确商户可记住分类；通用二维码及综合平台仅修改本笔",
                         style=MaterialTheme.typography.bodySmall)
                 }
             }
@@ -331,7 +332,8 @@ fun ScanCenterScreen(
                                     onClick={
                                         val remember=remembered && !isManual &&
                                             !ScanPaymentClassifier.isGenericCounterparty(
-                                                tx.counterparty)
+                                                tx.counterparty) &&
+                                            !CategoryWorkbenchPolicy.isMixedMerchant(tx.counterparty)
                                         onUpdateCategory(tx,name,remember)
                                     },
                                     label={Text(name)}

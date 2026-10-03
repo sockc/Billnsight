@@ -51,8 +51,9 @@ class MerchantCategoryPolicyTest {
         assertNull(MerchantCategoryPolicy.key(tx(source="手动记账"),emptyMap()))
     }
 
-    @Test fun historicalOtherIsFixableEvenIfPreviouslyFlaggedManual() {
-        assertTrue(MerchantCategoryPolicy.canReplaceHistorical(tx(category="其他"),true))
+    @Test fun manuallyConfirmedOtherIsProtectedFromMerchantWideChanges() {
+        assertFalse(MerchantCategoryPolicy.canReplaceHistorical(tx(category="其他"),true))
+        assertTrue(MerchantCategoryPolicy.canReplaceHistorical(tx(category="其他"),false))
         assertTrue(MerchantCategoryPolicy.canReplaceHistorical(tx(category="餐饮"),false))
     }
 

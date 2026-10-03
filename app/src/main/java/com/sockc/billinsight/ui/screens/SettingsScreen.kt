@@ -59,6 +59,7 @@ fun SettingsScreen(
     onOpenCredit:()->Unit,
     onOpenLoan:()->Unit,
     onOpenRules:()->Unit,
+    onOpenOrganize:()->Unit,
     onOpenTrends:()->Unit,
     onOpenScan:()->Unit,
 ) {
@@ -88,16 +89,12 @@ fun SettingsScreen(
                         Icons.Outlined.FileUpload,Color(0xFF20AF7B),onImport)
                     HorizontalDivider(Modifier.padding(horizontal=15.dp),
                         color=MaterialTheme.colorScheme.outlineVariant)
-                    SettingsMenuRow("分类与规则","商户自动分类及别名管理",
+                    SettingsMenuRow("待整理","按商户核对自动分类和冲突",
+                        Icons.Outlined.FactCheck,Color(0xFFE39C32),onOpenOrganize)
+                    HorizontalDivider(Modifier.padding(horizontal=15.dp),
+                        color=MaterialTheme.colorScheme.outlineVariant)
+                    SettingsMenuRow("分类与规则","已确认的商户、商品及别名管理",
                         Icons.Outlined.LocalOffer,Color(0xFFF48638),onOpenRules)
-                    HorizontalDivider(Modifier.padding(horizontal=15.dp),
-                        color=MaterialTheme.colorScheme.outlineVariant)
-                    SettingsMenuRow("信用卡管理","还款记录、手动补录与核对",
-                        Icons.Outlined.CreditCard,Color(0xFF8657EC),onOpenCredit)
-                    HorizontalDivider(Modifier.padding(horizontal=15.dp),
-                        color=MaterialTheme.colorScheme.outlineVariant)
-                    SettingsMenuRow("贷款管理","贷款机构与还款明细",
-                        Icons.Outlined.AccountBalance,Color(0xFFEE665C),onOpenLoan)
                 }
             }
         }
@@ -145,7 +142,7 @@ fun SettingsScreen(
             }
         }
         item {
-            Text("BillInsight V0.3.0 · 基于稳定 V0.2.6 重建",
+            Text("BillInsight V0.3.5 · 本地账单分类与可撤销整理",
                 modifier=Modifier.fillMaxWidth().padding(vertical=16.dp),
                 textAlign=androidx.compose.ui.text.style.TextAlign.Center,
                 style=MaterialTheme.typography.labelSmall,

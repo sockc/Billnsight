@@ -22,6 +22,8 @@ import com.sockc.billinsight.importer.ScanPaymentClassifier
 import com.sockc.billinsight.importer.PasswordRequiredException
 import com.sockc.billinsight.model.CategoryTotal
 import com.sockc.billinsight.model.CategoryEditPreview
+import com.sockc.billinsight.model.AutoCategoryPreview
+import com.sockc.billinsight.model.CategoryChangeBatch
 import com.sockc.billinsight.model.DailyTotal
 import com.sockc.billinsight.model.DashboardSummary
 import com.sockc.billinsight.model.ImportResult
@@ -58,6 +60,8 @@ import java.time.format.DateTimeFormatter
 class BillInsightViewModel(application: Application) : AndroidViewModel(application) {
     private val db = BillDatabase(application)
     private val financeStore = FinancePlanStore(db)
+    private var organizerOpened=false
+    private var categoryReviewLimit=8000
     private var financeNeedsAutoSync=true
     private var financeViewOpened=false
     private val importer = BillImporter(application, application.contentResolver)
@@ -115,6 +119,7 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             val previousCategoryPreviewId=_uiState.value.categoryPreviewId
             val previousCategoryPreviewCount=_uiState.value.categoryPreviewCount
             val previousCategoryPreview=_uiState.value.categoryPreview
+            val previousReview=_uiState.value.categoryReviewPreview
             val sameScope=_uiState.value.month==month &&
                 _uiState.value.platformFilter==platform
             val previousTrendDetails=if(sameScope) _uiState.value.trendDetails
@@ -134,16 +139,24 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 val aliases = db.productAliases()
                 val merchantAliases = db.merchantAliases()
                 val scanLabels = db.scanMerchantLabels()
+                val searchRows=db.searchTransactions(searchQuery, platform, searchFlowFilter,
+                    searchLimit,homeStartMillis,homeEndMillis)
                 val history = if (merchantPeriod == "MONTH") monthly else
                     db.merchantHistoryTransactions(month, platform, merchantPeriod)
                 BillUiState(
                     categoryPreviewId=previousCategoryPreviewId,
                     categoryPreviewCount=previousCategoryPreviewCount,
                     categoryPreview=previousCategoryPreview,
+                    categoryReviewPreview=if(organizerOpened)
+                        db.categoryReviewPreview(categoryReviewLimit) else previousReview,
+                    pendingCategoryCount=db.pendingCategoryCount(),
+                    latestCategoryBatch=db.latestCategoryBatch(),
+                    categoryEvidence=db.categoryEvidence(
+                        (searchRows+rangeRows.take(350)).distinctBy {it.id}),
                     searchQuery = searchQuery,
                     searchFlowFilter = searchFlowFilter,
                     searchLimit = searchLimit,
-                    searchResults = db.searchTransactions(searchQuery, platform, searchFlowFilter, searchLimit,homeStartMillis,homeEndMillis),
+                    searchResults = searchRows,
                     monthlyTransactions = monthly,
                     periodTransactions = rangeRows,
                     periodCategories = db.rangeCategoryTotals(homeStartMillis,homeEndMillis,platform),
@@ -421,6 +434,8 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                             startAt=preview.startAt,endAt=preview.endAt,
                             qrExpenseCount=preview.qrExpenseCount,
                             qrMerchantReviewCount=preview.qrMerchantReviewCount,
+                            autoClassified=db.lastImportAutoClassified,
+                            pendingOrganize=db.lastImportPendingOrganize,
                         )
                     }
                 }
@@ -430,7 +445,9 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
                 pendingParsedBill=null
                 _uiState.value=_uiState.value.copy(
                     isLoading=false,importPreview=null,lastImportResult=result,
-                    message="导入完成：新增 "+result.inserted+" 笔，重复 "+
+                    message="导入完成：新增 "+result.inserted+" 笔，其中自动分类 "+
+                        result.autoClassified+" 笔个人消费，待整理 "+
+                        result.pendingOrganize+" 笔；重复 "+
                         result.duplicated+" 笔"
                 )
                 refresh()
@@ -475,21 +492,35 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
         transaction:Transaction, category:String, rememberMerchant:Boolean=true
     ) {
         val meaningfulMerchant=rememberMerchant &&
-            !ScanPaymentClassifier.isGenericCounterparty(transaction.counterparty)
+            !ScanPaymentClassifier.isGenericCounterparty(transaction.counterparty) &&
+            !com.sockc.billinsight.importer.CategoryWorkbenchPolicy.isMixedMerchant(
+                transaction.counterparty)
         viewModelScope.launch {
             val result=runCatching {
                 withContext(Dispatchers.IO) {
                     synchronized(db) {
-                        db.updateCategory(transaction.id,transaction.counterparty,
-                            category,meaningfulMerchant)
+                        if(transaction.flowType==FlowType.EXPENSE &&
+                            transaction.sourceFile!="手动记账") {
+                            db.changeExpenseCategory(transaction.id,category,
+                                if(meaningfulMerchant) "MERCHANT" else "SINGLE")
+                        } else {
+                            db.updateCategory(transaction.id,transaction.counterparty,
+                                category,false)
+                            1
+                        }
                     }
                 }
             }
             _uiState.value=_uiState.value.copy(
                 message=result.fold(
-                    onSuccess={
+                    onSuccess={count->
                         "已改为 "+category+
-                            if(meaningfulMerchant) "，并记住该商户" else "（仅此交易）"
+                            if(meaningfulMerchant && transaction.sourceFile!="手动记账")
+                                "；修改 $count 笔并记住该商户，可撤销"
+                            else if(transaction.sourceFile!="手动记账" &&
+                                transaction.flowType==FlowType.EXPENSE)
+                                "（仅此交易，可撤销）"
+                            else "（仅此交易）"
                     },
                     onFailure={ it.message?:"分类保存失败" }
                 )
@@ -516,25 +547,91 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun changeExpenseCategory(tx: Transaction, category: String, scope: String) {
-        if(_uiState.value.isLoading) return
+        if(_uiState.value.isLoading)return
         viewModelScope.launch {
-            val outcome=runCatching { withContext(Dispatchers.IO) {
-                synchronized(db) { db.changeExpenseCategory(tx.id,category,scope) }
+            val outcome=runCatching {withContext(Dispatchers.IO) {
+                synchronized(db){db.changeExpenseCategory(tx.id,category,scope)}
             }}
             _uiState.value=_uiState.value.copy(
                 message=outcome.fold(
-                    onSuccess={ count -> when(scope) {
-                        "FUTURE" -> "已记住该商户以后导入的分类，历史记录不变"
-                        "MERCHANT" -> "已修改本笔并更新 ${(count-1).coerceAtLeast(0)} 笔未人工分类的历史消费"
-                        else -> "已修改当前这一笔分类"
-                    }},
+                    onSuccess={count->
+                        if(count>0)"分类已修改 $count 笔，可撤销本次操作"
+                        else "分类规则已保存，可撤销本次操作"
+                    },
                     onFailure={it.message?:"分类保存失败"}
                 ),
                 categoryPreviewId=null,
                 categoryPreviewCount=null,
-                categoryPreview=null
+                categoryPreview=null,
+                categoryReviewPreview=null,
             )
-            if(outcome.isSuccess) refresh()
+            if(outcome.isSuccess)refresh()
+        }
+    }
+
+    fun closeCategoryOrganizer() {
+        organizerOpened=false
+        categoryReviewLimit=8000
+        _uiState.value=_uiState.value.copy(categoryReviewPreview=null)
+    }
+
+    fun openCategoryOrganizer() {
+        if(_uiState.value.isLoading)return
+        organizerOpened=true
+        viewModelScope.launch {
+            _uiState.value=_uiState.value.copy(
+                categoryReviewLoading=true,categoryReviewPreview=null
+            )
+            val result=runCatching {withContext(Dispatchers.IO) {
+                synchronized(db){db.categoryReviewPreview(categoryReviewLimit)}
+            }}
+            _uiState.value=_uiState.value.copy(
+                categoryReviewLoading=false,
+                categoryReviewPreview=result.getOrNull(),
+                message=result.exceptionOrNull()?.message
+            )
+        }
+    }
+
+    fun loadMoreCategoryReview() {
+        if(_uiState.value.categoryReviewLoading)return
+        categoryReviewLimit=(categoryReviewLimit+8000).coerceAtMost(100000)
+        openCategoryOrganizer()
+    }
+
+    fun applyCategoryReviewPreview() {
+        val preview=_uiState.value.categoryReviewPreview?:return
+        if(_uiState.value.isLoading || _uiState.value.categoryReviewLoading)return
+        viewModelScope.launch {
+            _uiState.value=_uiState.value.copy(categoryReviewLoading=true)
+            val result=runCatching {withContext(Dispatchers.IO) {
+                synchronized(db){db.applyCategoryReviewPreview(categoryReviewLimit)}
+            }}
+            _uiState.value=_uiState.value.copy(
+                categoryReviewLoading=false,categoryReviewPreview=null,
+                message=result.fold(
+                    onSuccess={ "已按预览修改 ${it.changed} 笔；可撤销" },
+                    onFailure={ it.message?:"批量分类失败，原账单未更改" }
+                )
+            )
+            if(result.isSuccess)refresh()
+        }
+    }
+
+    fun undoLastCategoryBatch() {
+        if(_uiState.value.isLoading)return
+        viewModelScope.launch {
+            val result=runCatching {withContext(Dispatchers.IO) {
+                synchronized(db){db.undoLastCategoryBatch()}
+            }}
+            _uiState.value=_uiState.value.copy(
+                categoryReviewPreview=null,
+                message=result.fold(
+                    onSuccess={ "已撤销 $it 项仍未被再次修改的分类及规则" },
+                    onFailure={ it.message?:"撤销失败，原始账单未修改" }
+                )
+            )
+            if(result.isSuccess)refresh()
         }
     }
 
@@ -1105,6 +1202,11 @@ data class BillUiState(
     val categoryPreviewId: Long? = null,
     val categoryPreviewCount: Int? = null,
     val categoryPreview: CategoryEditPreview? = null,
+    val pendingCategoryCount:Int = 0,
+    val categoryReviewPreview:AutoCategoryPreview? = null,
+    val categoryReviewLoading:Boolean = false,
+    val latestCategoryBatch:CategoryChangeBatch? = null,
+    val categoryEvidence:Map<Long,String> = emptyMap(),
     val homePeriod: String = "MONTH",
     val homeStart: LocalDate = LocalDate.now().withDayOfMonth(1),
     val homeEnd: LocalDate = LocalDate.now(),

@@ -53,6 +53,8 @@ data class CategoryEditPreview(
     val eligibleCount: Int = 0,
     val protectedCount: Int = 0,
     val variantCount: Int = 0,
+    val crossEligibleCount:Int = 0,
+    val productEligibleCount:Int = 0,
 )
 
 data class PlatformCategoryRule(val platform: Platform, val merchant: String, val category: String, val affectedCount: Int)
@@ -120,6 +122,8 @@ data class ImportResult(
     val endAt: Long? = null,
     val qrExpenseCount: Int = 0,
     val qrMerchantReviewCount: Int = 0,
+    val autoClassified:Int=0,
+    val pendingOrganize:Int=0,
 )
 
 data class ProductGroup(

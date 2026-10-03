@@ -29,48 +29,19 @@ fun AnalysisScreen(
     onSelectPeriod: (String,LocalDate?,LocalDate?) -> Unit,
     onChangeExpenseCategory: (Transaction,String,String) -> Unit,
     onPreviewExpenseCategory: (Transaction) -> Unit,
-    onReclassify: (Boolean) -> Unit,
+    onOpenOrganize: () -> Unit,
+    onOpenFinance: () -> Unit,
+    onOpenTrends: () -> Unit,
 ) {
     var section by remember { mutableStateOf("SPENDING") }
     var spendingRank by remember { mutableStateOf("CATEGORY") }
     var showTransfers by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<Transaction?>(null) }
-    var confirmReclassify by remember { mutableStateOf(false) }
-    var includeReviewedOther by remember { mutableStateOf(false) }
-    if (confirmReclassify) {
-        AlertDialog(
-            onDismissRequest = { confirmReclassify = false },
-            title = { Text("自动识别其他消费？") },
-            text = {
-                Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                    Text("检查全账本的“其他”消费，优先应用已保存的商户规则。其他人工分类、还款及资金流转均不更改。")
-                    Row(verticalAlignment=Alignment.CenterVertically) {
-                        Text("同时重新检查曾手动标记为“其他”的账单",
-                            modifier=Modifier.weight(1f),
-                            style=MaterialTheme.typography.bodySmall)
-                        Switch(checked=includeReviewedOther,
-                            onCheckedChange={includeReviewedOther=it})
-                    }
-                    Text("默认关闭。开启后仅允许把原分类仍为“其他”的导入账单改为明确匹配的类别；仍不会覆盖其他人工分类。",
-                        style=MaterialTheme.typography.labelSmall,
-                        color=MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    confirmReclassify = false
-                    onReclassify(includeReviewedOther)
-                }) { Text("开始识别") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmReclassify = false }) { Text("取消") }
-            }
-        )
-    }
     editingCategory?.let { tx ->
         ExpenseCategoryDialog(
             transaction=tx,
             preview=if(state.categoryPreviewId==tx.id) state.categoryPreview else null,
+            evidence=state.categoryEvidence[tx.id].orEmpty(),
             onDismiss={editingCategory=null},
             onConfirm={item,category,scope->
                 onChangeExpenseCategory(item,category,scope)
@@ -116,7 +87,7 @@ fun AnalysisScreen(
                 listOf(
                     "SPENDING" to "支出去向",
                     "INCOME" to "收入来源",
-                    "REPAYMENT" to "还款分析"
+                    "TREND" to "趋势"
                 ).forEach { (key,label) ->
                     FilterChip(
                         selected=section==key,onClick={section=key},
@@ -181,7 +152,7 @@ fun AnalysisScreen(
                                     style=MaterialTheme.typography.titleMedium)
                             }
                             if(group.category=="其他") {
-                                TextButton(onClick={includeReviewedOther=false;confirmReclassify=true},
+                                TextButton(onClick=onOpenOrganize,
                                     modifier=Modifier.padding(horizontal=9.dp)) {
                                     Text("一键识别未分类账单")
                                 }
@@ -265,78 +236,42 @@ fun AnalysisScreen(
             }
         } else {
             item {
-                OverviewAmountCard("本期还款",
-                    state.homeSummary.creditRepaymentCent+
-                        state.homeSummary.loanRepaymentCent,
-                    "信用卡 ${state.homeSummary.creditRepaymentCent.toYuanText()} · "+
-                    "贷款 ${state.homeSummary.loanRepaymentCent.toYuanText()}")
+                OverviewAmountCard("消费趋势",state.homeSummary.shoppingConsumptionCent,
+                    "最近 30 天及历史月份的消费变化")
             }
-            item {SectionHeader("信用卡还款","按银行与卡片统计，还款不重复算消费")}
-            if(cards.isEmpty()) item {EmptyFinanceCard("所选期间暂无信用卡还款")}
-            items(cards,key={"credit_"+it}) { name ->
-                val originals=credit[name].orEmpty()
-                val supplements=manual[name].orEmpty()
-                var expanded by remember(
-                    state.homeStart,state.homeEnd,state.platformFilter,name
-                ){mutableStateOf(false)}
+            item {
                 Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
-                    shape=RoundedCornerShape(17.dp)) {
-                    Column {
-                        Row(Modifier.fillMaxWidth().clickable {expanded=!expanded}
-                            .padding(14.dp),
-                            horizontalArrangement=Arrangement.SpaceBetween) {
-                            Column(Modifier.weight(1f)) {
-                                Text(name,fontWeight=FontWeight.SemiBold)
-                                Text("${originals.size+supplements.size} 笔 · "+
-                                    if(expanded)"收起 ▲" else "查看还款 ▼",
-                                    style=MaterialTheme.typography.labelSmall)
-                            }
-                            Text((originals.sumOf {it.amountCent}+
-                                supplements.sumOf {it.amountCent}).toYuanText(),
-                                fontWeight=FontWeight.Bold)
-                        }
-                        if(expanded) {
-                            originals.forEach {TransactionCard(it)}
-                            supplements.forEach {
-                                Text("手动补录 · "+it.amountCent.toYuanText(),
-                                    modifier=Modifier.padding(14.dp),
-                                    style=MaterialTheme.typography.bodySmall)
-                            }
+                    shape=RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(17.dp),
+                        verticalArrangement=Arrangement.spacedBy(10.dp)){
+                        Text("历史消费趋势",fontWeight=FontWeight.SemiBold)
+                        Text("查看近 30 天与最近 12 个月的趋势，"+
+                            "点选时段可查看原始账单。",
+                            style=MaterialTheme.typography.bodySmall)
+                        Button(onClick=onOpenTrends,
+                            modifier=Modifier.fillMaxWidth()) {
+                            Text("打开消费趋势 ›")
                         }
                     }
                 }
             }
-            item {SectionHeader("贷款还款",
-                "本金和利息拆分以已确认的还款明细为准")}
-            if(loans.isEmpty()) item {EmptyFinanceCard("所选期间暂无贷款还款")}
-            items(loans.toList(),key={"loan_"+it.first}) { (name,records) ->
-                var expanded by remember(
-                    state.homeStart,state.homeEnd,state.platformFilter,name
-                ){mutableStateOf(false)}
-                Card(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=4.dp),
-                    shape=RoundedCornerShape(17.dp)) {
-                    Column {
-                        Row(Modifier.fillMaxWidth().clickable {expanded=!expanded}
-                            .padding(14.dp),horizontalArrangement=Arrangement.SpaceBetween) {
-                            Column(Modifier.weight(1f)) {
-                                Text(name,fontWeight=FontWeight.SemiBold)
-                                Text("${records.size} 笔 · "+
-                                    if(expanded)"收起 ▲" else "查看还款 ▼",
-                                    style=MaterialTheme.typography.labelSmall)
-                            }
-                            Text(records.sumOf {it.amountCent}.toYuanText(),
-                                fontWeight=FontWeight.Bold)
-                        }
-                        if(expanded) records.forEach {TransactionCard(it)}
+        }
+        item {
+            Card(Modifier.fillMaxWidth().padding(horizontal=16.dp),
+                shape=RoundedCornerShape(16.dp)) {
+                Row(Modifier.fillMaxWidth().padding(13.dp),
+                    verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("本期还款 "+
+                            (state.homeSummary.creditRepaymentCent+
+                                state.homeSummary.loanRepaymentCent).toYuanText(),
+                            style=MaterialTheme.typography.bodyMedium)
+                        Text("信用卡、贷款及分期明细统一在金融中心管理",
+                            style=MaterialTheme.typography.labelSmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    TextButton(onClick=onOpenFinance){Text("查看金融 ›")}
                 }
-            }
-            if(state.homeSummary.loanFinanceCostCent>0) item {
-                Text("其中已确认利息及手续费 "+
-                    state.homeSummary.loanFinanceCostCent.toYuanText(),
-                    modifier=Modifier.padding(horizontal=20.dp,vertical=8.dp),
-                    style=MaterialTheme.typography.bodySmall,
-                    color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         if(state.periodTransactions.size>=10000) item {
@@ -371,9 +306,9 @@ private fun OverviewAmountCard(title:String,amount:Long,subtitle:String) {
 private fun AnalysisEditableTransaction(tx:Transaction,onEdit:(Transaction)->Unit) {
     TransactionCard(
         tx,
-        onCategoryClick={onEdit(tx)},
+        onCategoryClick=if(tx.flowType==FlowType.EXPENSE) ({onEdit(tx)}) else null,
         trailing={
-            TextButton(onClick={onEdit(tx)}) {
+            if(tx.flowType==FlowType.EXPENSE) TextButton(onClick={onEdit(tx)}) {
                 Text("修改分类",style=MaterialTheme.typography.labelMedium)
             }
         }
