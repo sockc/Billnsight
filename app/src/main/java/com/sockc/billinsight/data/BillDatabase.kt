@@ -44,6 +44,10 @@ import java.time.ZoneId
 import kotlin.math.roundToLong
 
 class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
+    var lastImportAutoClassified:Int=0
+        private set
+    var lastImportPendingOrganize:Int=0
+        private set
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -924,6 +928,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     fun insertAll(items: List<Transaction>): Pair<Int, Int> {
         var inserted = 0
         var duplicate = 0
+        var autoClassified=0
+        var pendingOrganize=0
         val classificationStore=CategoryWorkbenchStore(this)
         writableDatabase.beginTransaction()
         try {
@@ -986,10 +992,13 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
                     // Credit defaults are repaired in one batch after importing.
                 } else {
                     inserted++
-                    if(item.flowType==FlowType.EXPENSE)
-                        classificationStore.rememberImportedEvidence(
+                    when(item.flowType) {
+                        FlowType.EXPENSE -> if(classificationStore.rememberImportedEvidence(
                             item.copy(id=id),item.category
-                        )
+                        ))pendingOrganize++ else autoClassified++
+                        FlowType.PENDING ->pendingOrganize++
+                        else ->Unit
+                    }
                 }
             }
             if (items.any { it.flowType == FlowType.CREDIT_REPAYMENT }) {
@@ -1000,6 +1009,8 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
         } finally {
             writableDatabase.endTransaction()
         }
+        lastImportAutoClassified=autoClassified
+        lastImportPendingOrganize=pendingOrganize
         return inserted to duplicate
     }
 
