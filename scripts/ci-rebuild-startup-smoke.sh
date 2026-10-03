@@ -80,7 +80,7 @@ nodes=[n for n in root.iter("node")
        if n.attrib.get("text")=="金融中心" or n.attrib.get("content-desc")=="金融中心"]
 assert nodes, "Finance Center bottom-navigation item not visible"
 bounds=nodes[-1].attrib["bounds"]
-l,t,r,b=map(int,re.findall(r"\\d+",bounds))
+l,t,r,b=map(int,re.findall(r"\d+",bounds))
 print((l+r)//2,(t+b)//2)
 PY
 )
@@ -96,7 +96,7 @@ texts={v for n in root.iter("node")
        for v in (n.attrib.get("text",""),n.attrib.get("content-desc","")) if v}
 for needle in ("金融中心","账单还款","资金流转"):
     assert any(needle in t for t in texts), ("Finance Center missing "+needle,texts)
-assert any(re.search(r"20\\d{2}年",t) for t in texts), ("Year filter missing",texts)
+assert any(re.search(r"20\d{2}年",t) for t in texts), ("Year filter missing",texts)
 assert not any("账本读取失败" in t or "SQLiteException" in t for t in texts)
 print("PASS: upgraded financial center renders year selector and financial sections")
 PY
