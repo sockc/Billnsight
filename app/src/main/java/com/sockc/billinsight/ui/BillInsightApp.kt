@@ -298,6 +298,16 @@ fun BillInsightApp(viewModel: BillInsightViewModel) {
                     onUndo=viewModel::undoLastCategoryBatch,
                     onPreviewTransaction=viewModel::previewExpenseCategory,
                     onChangeCategory=viewModel::changeExpenseCategory,
+                    onReviewPurpose={tx->
+                        viewModel.closeCategoryOrganizer()
+                        detailPage=null
+                        selected=1
+                        val day=java.time.Instant.ofEpochMilli(tx.occurredAt)
+                            .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                        viewModel.setHomePeriod("CUSTOM",day,day)
+                        viewModel.setSearchFlowFilter("ALL")
+                        viewModel.setSearchQuery(tx.counterparty.ifBlank {tx.description})
+                    },
                 )
                 "rules" -> RuleCenterScreen(
                     state=state,onBack={detailPage=null},
