@@ -155,7 +155,7 @@ class CategoryWorkbenchStore(private val helper: BillDatabase) {
 
     fun pendingOtherCount():Int =
         db.rawQuery(
-            "SELECT COUNT(*) FROM transactions WHERE flow_type='EXPENSE' AND category='其他'",
+            "SELECT COUNT(*) FROM transactions WHERE flow_type='EXPENSE' AND category='其他' AND nature_modified=0 AND source_file NOT LIKE '手动%'",
             null
         ).use {c->c.moveToFirst();c.getInt(0)}
 
