@@ -2452,7 +2452,15 @@ class BillDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, 
     }
 
     private fun registerPersonTransfer(db:SQLiteDatabase,tx:Transaction) {
-        val direction=TransferPolicy.personDirection(tx) ?: return
+        val direction=TransferPolicy.personDirection(tx)
+        if(direction==null){
+            // Preserve manually tagged transfers after category edits; drop only
+            // a tag whose recorded direction contradicts a changed financial purpose.
+            val compatible=if(tx.flowType==FlowType.INCOME)"IN" else "OUT"
+            db.delete("person_transfer_tags","transaction_id=? AND direction<>?",
+                arrayOf(tx.id.toString(),compatible))
+            return
+        }
         db.insertWithOnConflict("person_transfer_tags",null,ContentValues().apply {
             put("transaction_id",tx.id);put("direction",direction)
         },SQLiteDatabase.CONFLICT_REPLACE)
