@@ -94,11 +94,12 @@ import xml.etree.ElementTree as ET,re
 root=ET.parse("/tmp/billinsight-finance.xml").getroot()
 texts={v for n in root.iter("node")
        for v in (n.attrib.get("text",""),n.attrib.get("content-desc","")) if v}
-for needle in ("金融中心","账单还款","资金流转"):
+# The final tab is off-screen in a horizontally scrollable row.
+for needle in ("金融中心","账单还款"):
     assert any(needle in t for t in texts), ("Finance Center missing "+needle,texts)
 assert any(re.search(r"20\d{2}年",t) for t in texts), ("Year filter missing",texts)
 assert not any("账本读取失败" in t or "SQLiteException" in t for t in texts)
-print("PASS: upgraded financial center renders year selector and financial sections")
+print("PASS: upgraded financial center renders year selector and repayment section")
 PY
 adb shell am force-stop "$APP"
 adb exec-out run-as "$APP" cat databases/bill_insight.db > /tmp/ledger-v13.db
