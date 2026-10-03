@@ -84,9 +84,16 @@ object MerchantLexicon {
     )
 
     fun requiresProductEvidence(merchant: String): Boolean {
+        val raw=merchant.trim().lowercase(Locale.ROOT)
         val name=normalize(merchant)
-        return mixedPlatforms.any { name.contains(normalize(it)) } ||
-            paymentProcessors.any { name.contains(normalize(it)) }
+        return mixedPlatforms.any {platform->
+            val token=normalize(platform)
+            if(token.isBlank()) raw.contains(platform.lowercase(Locale.ROOT))
+            else name.contains(token)
+        } || paymentProcessors.any {processor->
+            // Do not turn short generic words such as "支付" into a global match.
+            raw.contains(processor.lowercase(Locale.ROOT))
+        }
     }
 
     private fun match(
