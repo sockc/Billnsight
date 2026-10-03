@@ -29,22 +29,37 @@ fun AnalysisScreen(
     onSelectPeriod: (String,LocalDate?,LocalDate?) -> Unit,
     onChangeExpenseCategory: (Transaction,String,String) -> Unit,
     onPreviewExpenseCategory: (Transaction) -> Unit,
-    onReclassify: () -> Unit,
+    onReclassify: (Boolean) -> Unit,
 ) {
     var section by remember { mutableStateOf("SPENDING") }
     var spendingRank by remember { mutableStateOf("CATEGORY") }
     var showTransfers by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<Transaction?>(null) }
     var confirmReclassify by remember { mutableStateOf(false) }
+    var includeReviewedOther by remember { mutableStateOf(false) }
     if (confirmReclassify) {
         AlertDialog(
             onDismissRequest = { confirmReclassify = false },
             title = { Text("自动识别其他消费？") },
-            text = { Text("将检查全账本尚未人工分类的“其他”消费，优先使用你保存的商户规则。不会更改手动分类、还款或资金流转。") },
+            text = {
+                Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                    Text("检查全账本的“其他”消费，优先应用已保存的商户规则。其他人工分类、还款及资金流转均不更改。")
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text("同时重新检查曾手动标记为“其他”的账单",
+                            modifier=Modifier.weight(1f),
+                            style=MaterialTheme.typography.bodySmall)
+                        Switch(checked=includeReviewedOther,
+                            onCheckedChange={includeReviewedOther=it})
+                    }
+                    Text("默认关闭。开启后仅允许把原分类仍为“其他”的导入账单改为明确匹配的类别；仍不会覆盖其他人工分类。",
+                        style=MaterialTheme.typography.labelSmall,
+                        color=MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
             confirmButton = {
                 Button(onClick = {
                     confirmReclassify = false
-                    onReclassify()
+                    onReclassify(includeReviewedOther)
                 }) { Text("开始识别") }
             },
             dismissButton = {
@@ -166,7 +181,7 @@ fun AnalysisScreen(
                                     style=MaterialTheme.typography.titleMedium)
                             }
                             if(group.category=="其他") {
-                                TextButton(onClick={confirmReclassify=true},
+                                TextButton(onClick={includeReviewedOther=false;confirmReclassify=true},
                                     modifier=Modifier.padding(horizontal=9.dp)) {
                                     Text("一键识别未分类账单")
                                 }

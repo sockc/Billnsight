@@ -729,19 +729,23 @@ class BillInsightViewModel(application: Application) : AndroidViewModel(applicat
             deleteProductAlias(key)
         }
 
-    fun reclassifyOtherExpenses() {
+    fun reclassifyOtherExpenses(includeReviewedOther: Boolean = false) {
         if (_uiState.value.isLoading) return
         viewModelScope.launch {
             val outcome = runCatching {
                 withContext(Dispatchers.IO) {
-                    synchronized(db) { db.reclassifyOtherExpenses() }
+                    synchronized(db) { db.reclassifyOtherExpenses(includeReviewedOther) }
                 }
             }
             _uiState.value = _uiState.value.copy(
                 dataAudit = null,
                 message = outcome.fold(
-                    onSuccess = { (changed, remaining) ->
-                        "已重新识别 $changed 笔其他消费，剩余 $remaining 笔需确认；人工分类未改动"
+                    onSuccess = { report ->
+                        "本次检查 ${report.checked} 笔，成功识别 ${report.updated} 笔；" +
+                            "全账本仍有 ${report.remaining} 笔其他消费：" +
+                            "词库未命中 ${report.unmatched}、" +
+                            "已人工标记其他 ${report.reviewedOther}、" +
+                            "手动记账 ${report.manualOther}"
                     },
                     onFailure = { it.message ?: "重新识别失败，原始账单未修改" }
                 )
