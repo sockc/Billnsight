@@ -67,7 +67,40 @@ adb logcat -c
 adb shell am start -W -n "$APP/.MainActivity"
 sleep 9
 adb shell pidof "$APP"
-check_home_screen "upgraded V0.3.1"
+check_home_screen "upgraded V0.3.4"
+
+# Exercise the actual newly added Finance Center UI. Merely launching the
+# process or dashboard would miss Compose/page-specific regressions.
+adb shell uiautomator dump /sdcard/billinsight-ui.xml >/dev/null
+adb exec-out cat /sdcard/billinsight-ui.xml > /tmp/billinsight-ui.xml
+coords=$(python3 - <<'PY'
+import re,xml.etree.ElementTree as ET
+root=ET.parse("/tmp/billinsight-ui.xml").getroot()
+nodes=[n for n in root.iter("node")
+       if n.attrib.get("text")=="金融中心" or n.attrib.get("content-desc")=="金融中心"]
+assert nodes, "Finance Center bottom-navigation item not visible"
+bounds=nodes[-1].attrib["bounds"]
+l,t,r,b=map(int,re.findall(r"\d+",bounds))
+print((l+r)//2,(t+b)//2)
+PY
+)
+adb shell input tap $coords
+sleep 8
+adb shell pidof "$APP"
+adb shell uiautomator dump /sdcard/billinsight-finance.xml >/dev/null
+adb exec-out cat /sdcard/billinsight-finance.xml > /tmp/billinsight-finance.xml
+python3 - <<'PY'
+import xml.etree.ElementTree as ET,re
+root=ET.parse("/tmp/billinsight-finance.xml").getroot()
+texts={v for n in root.iter("node")
+       for v in (n.attrib.get("text",""),n.attrib.get("content-desc","")) if v}
+# The final tab is off-screen in a horizontally scrollable row.
+for needle in ("金融中心","账单还款"):
+    assert any(needle in t for t in texts), ("Finance Center missing "+needle,texts)
+assert any(re.search(r"20\d{2}年",t) for t in texts), ("Year filter missing",texts)
+assert not any("账本读取失败" in t or "SQLiteException" in t for t in texts)
+print("PASS: upgraded financial center renders year selector and repayment section")
+PY
 adb shell am force-stop "$APP"
 adb exec-out run-as "$APP" cat databases/bill_insight.db > /tmp/ledger-v13.db
 if adb shell run-as "$APP" test -s databases/bill_insight.db-wal; then
@@ -82,7 +115,7 @@ row=db.execute("SELECT counterparty,amount_cent,category FROM transactions WHERE
 assert row==("拾贰便利店",1200,"其他"), f"Original imported ledger changed or missing: {row}"
 tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 assert {"finance_installment_plans","finance_installment_links"}<=tables, tables
-print("PASS: V0.2.6 -> V0.3.0 Android boot; migration retained original ledger")
+print("PASS: V0.2.6 -> V0.3.4 Android boot; migration retained original ledger")
 db.close()
 PY
 

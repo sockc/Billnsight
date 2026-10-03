@@ -35,7 +35,7 @@ fun DailyLedgerHeader(day: LocalDate, transactions: List<Transaction>) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 9.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
-                day.format(DateTimeFormatter.ofPattern("MM月dd日 EEEE",Locale.CHINA)),
+                day.format(DateTimeFormatter.ofPattern("yyyy年MM月dd日 EEEE",Locale.CHINA)),
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleSmall
             )
