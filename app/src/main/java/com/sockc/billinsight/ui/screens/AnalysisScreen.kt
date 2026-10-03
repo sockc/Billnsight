@@ -271,7 +271,7 @@ fun AnalysisScreen(
                             Text("贷款还款")
                             Text(state.homeSummary.loanRepaymentCent.toYuanText())
                         }
-                        Button(onClick=onOpenFinance,Modifier.fillMaxWidth()){
+                        Button(onClick=onOpenFinance,modifier=Modifier.fillMaxWidth()){
                             Text("查看金融还款明细 ›")
                         }
                     }
@@ -518,7 +518,7 @@ private fun TransferPersonCard(
                 if(state.personTransferHasMore && !state.personTransferLoading)
                     TextButton(onClick={
                         onOpen(person.key,state.selectedPersonDirection,true)
-                    },Modifier.fillMaxWidth()){Text("加载更多明细")}
+                    },modifier=Modifier.fillMaxWidth()){Text("加载更多明细")}
             }
         }
     }
