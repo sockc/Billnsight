@@ -53,6 +53,8 @@ data class CategoryEditPreview(
     val eligibleCount: Int = 0,
     val protectedCount: Int = 0,
     val variantCount: Int = 0,
+    val crossEligibleCount:Int = 0,
+    val productEligibleCount:Int = 0,
 )
 
 data class PlatformCategoryRule(val platform: Platform, val merchant: String, val category: String, val affectedCount: Int)
