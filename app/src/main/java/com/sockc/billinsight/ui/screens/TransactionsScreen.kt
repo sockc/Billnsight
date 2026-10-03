@@ -254,7 +254,7 @@ fun TransactionsScreen(
                 }
                 TransactionCard(tx,
                     onMerchantClick={editing=tx},
-                    onCategoryClick=if(tx.flowType in setOf(FlowType.EXPENSE,FlowType.GIFT_EXPENSE)) ({
+                    onCategoryClick=if(tx.flowType==FlowType.EXPENSE) ({
                         editingCategory=tx
                         onPreviewExpenseCategory(tx)
                     }) else null,
@@ -274,7 +274,7 @@ fun TransactionsScreen(
                             TextButton(onClick={
                                 evidenceId=if(evidenceId==tx.id)null else tx.id
                             }) {Text("分类依据")}
-                            TextButton(onClick={
+                            if(tx.flowType==FlowType.EXPENSE) TextButton(onClick={
                                 editingCategory=tx
                                 onPreviewExpenseCategory(tx)
                             }) {Text("修改分类")}
